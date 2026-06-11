@@ -8,4 +8,4 @@ build/
 dist/
 runpod_results/
 .env
-.env.local
+.env.*

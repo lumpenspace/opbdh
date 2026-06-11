@@ -31,8 +31,13 @@ from .remote import (
 
 from .config import OpbdhConfig, model_slug
 from .gpu import candidate_gpus, estimated_hourly
+from .hal import HalEye
 from .hf import estimate_model_size_gb, suggested_network_volume_gb
 from .verify import default_command_for_code, verify_code
+
+
+class MaxSpendReached(RuntimeError):
+    """The estimated cost of the run crossed the configured max_spend_dollars."""
 
 
 RUN_ROOT = "/opbdh-run"
@@ -75,7 +80,10 @@ class OpbdhRunResult:
 
 
 def _should_include(relative: Path) -> bool:
-    return not any(part in EXCLUDED_NAMES for part in relative.parts)
+    for part in relative.parts:
+        if part in EXCLUDED_NAMES or part == ".env" or part.startswith(".env."):
+            return False
+    return True
 
 
 def _reset_tar_info(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
@@ -106,7 +114,6 @@ def _add_code_to_tar(archive: tarfile.TarFile, code_path: Path) -> None:
 
 def build_job_script(config: OpbdhConfig, *, command: str, network_volume_id: str) -> str:
     cache_root = RUNPOD_NETWORK_CACHE_ROOT if network_volume_id else RUNPOD_CACHE_ROOT
-    hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or ""
     download_block = ""
     if config.pre_download_model and config.model_id:
         download_block = f"""
@@ -143,8 +150,6 @@ export HF_XET_CACHE={shlex.quote(str(Path(cache_root) / "huggingface" / "xet"))}
 export TRANSFORMERS_CACHE={shlex.quote(str(Path(cache_root) / "huggingface" / "transformers"))}
 export XDG_CACHE_HOME={shlex.quote(str(Path(cache_root) / "xdg"))}
 export PIP_CACHE_DIR={shlex.quote(str(Path(cache_root) / "pip"))}
-export HF_TOKEN={shlex.quote(hf_token)}
-export HUGGING_FACE_HUB_TOKEN={shlex.quote(hf_token)}
 export OPBDH_MODEL_ID={shlex.quote(config.model_id)}
 export OPBDH_RESULTS_DIR={RUN_ROOT}/results
 export PYTHONUNBUFFERED=1
@@ -286,11 +291,14 @@ def _remote_text(ssh_target: RunpodSshTarget, key_path: Path, script: str) -> st
     return completed.stdout
 
 
-def _start_remote_job(ssh_target: RunpodSshTarget, key_path: Path) -> str:
+def _start_remote_job(ssh_target: RunpodSshTarget, key_path: Path, *, env: dict[str, str] | None = None) -> str:
+    # Secrets travel as session env vars (exported outside the subshell so $! still
+    # points at job.sh) instead of being written into job.sh on the pod's disk.
+    exports = "".join(f"export {key}={shlex.quote(value)} && " for key, value in (env or {}).items())
     return _remote_text(
         ssh_target,
         key_path,
-        f"cd {RUN_ROOT} && mkdir -p logs results && "
+        f"cd {RUN_ROOT} && mkdir -p logs results && {exports}"
         "(nohup bash job.sh > logs/stdout.log 2> logs/stderr.log & echo $! > logs/job.pid) && "
         "cat logs/job.pid",
     ).strip()
@@ -398,65 +406,80 @@ def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None
     selected_gpu_type = ""
     delete_pod = True
     try:
-        network_volume_id = ensure_network_volume(plan)
-        bundle = build_bundle(
-            plan.config,
-            code_path=plan.code_path,
-            command=plan.command,
-            run_id=plan.run_id,
-            network_volume_id=network_volume_id,
-        )
-        _append_local_log(local_log, "Requesting RunPod pod.")
-        pod_id, ssh_label, selected_gpu_type = create_runpod_pod(
-            name=f"opbdh-{plan.run_id}",
-            cloud_type=plan.config.cloud_type,
-            public_key=public_key_text,
-            gpu_types=plan.gpu_type_ids,
-            image=plan.config.image,
-            volume_gb=plan.config.pod_volume_gb,
-            container_disk_gb=plan.config.container_disk_gb,
-            network_volume_id=network_volume_id,
-            search_from=plan.code_path.parent,
-        )
-        _append_local_log(local_log, f"Pod {pod_id} requested on {selected_gpu_type}; SSH hint: {ssh_label}.")
-        pod = wait_for_runpod_pod(pod_id, search_from=plan.code_path.parent)
-        ssh_target = extract_runpod_ssh_target(pod)
-        if ssh_target is None:
-            raise RuntimeError(f"RunPod pod {pod_id} is running but public SSH mapping was not returned")
-        _append_local_log(local_log, f"Waiting for SSH at root@{ssh_target.host}:{ssh_target.port}.")
-        wait_for_ssh(ssh_target, private_key)
-        _append_local_log(local_log, "Uploading code bundle.")
-        _upload_bundle(ssh_target, private_key, bundle)
-        _append_local_log(local_log, "Bundle uploaded. Starting remote job.")
-        remote_pid = _start_remote_job(ssh_target, private_key)
-        _append_local_log(local_log, f"Remote PID {remote_pid}.")
-        start = time.time()
-        hourly = estimated_hourly(selected_gpu_type, plan.config.cloud_type) or plan.estimated_hourly_dollars or 0.0
-        while True:
-            status, returncode = _remote_status(ssh_target, private_key)
-            sync_results_from_pod(ssh_target, private_key, plan.results_dir)
-            if status == "done":
-                final_code = returncode if returncode is not None else 1
-                _append_local_log(local_log, f"Remote job finished with exit code {final_code}.")
-                if final_code != 0:
-                    raise RuntimeError(f"remote job failed with exit code {final_code}; see {plan.results_dir / 'logs'}")
-                delete_pod = not plan.config.keep_pod_on_success
-                return OpbdhRunResult(
-                    run_id=plan.run_id,
-                    pod_id=pod_id,
-                    gpu_type_id=selected_gpu_type,
-                    results_dir=plan.results_dir,
-                    returncode=final_code,
-                    kept_pod=not delete_pod,
-                )
-            if status != "running":
-                raise RuntimeError(f"remote job status became {status!r}")
-            if hourly > 0 and plan.config.max_spend_dollars > 0:
-                spent = ((time.time() - start) / 3600) * hourly
-                if spent >= plan.config.max_spend_dollars:
-                    _stop_remote_job(ssh_target, private_key)
-                    raise RuntimeError(f"max spend reached (${spent:.2f} >= ${plan.config.max_spend_dollars:.2f})")
-            time.sleep(max(5, int(plan.config.poll_seconds)))
+        with HalEye("preparing the mission") as eye:
+            network_volume_id = ensure_network_volume(plan)
+            bundle = build_bundle(
+                plan.config,
+                code_path=plan.code_path,
+                command=plan.command,
+                run_id=plan.run_id,
+                network_volume_id=network_volume_id,
+            )
+            _append_local_log(local_log, "Requesting RunPod pod.")
+            eye.update("requesting a pod")
+            pod_id, ssh_label, selected_gpu_type = create_runpod_pod(
+                name=f"opbdh-{plan.run_id}",
+                cloud_type=plan.config.cloud_type,
+                public_key=public_key_text,
+                gpu_types=plan.gpu_type_ids,
+                image=plan.config.image,
+                volume_gb=plan.config.pod_volume_gb,
+                container_disk_gb=plan.config.container_disk_gb,
+                network_volume_id=network_volume_id,
+                search_from=plan.code_path.parent,
+            )
+            _append_local_log(local_log, f"Pod {pod_id} requested on {selected_gpu_type}; SSH hint: {ssh_label}.")
+            # Billing starts when the pod is created, not when the job starts.
+            start = time.time()
+            hourly = estimated_hourly(selected_gpu_type, plan.config.cloud_type) or plan.estimated_hourly_dollars or 0.0
+            eye.set_billing(started_at=start, hourly_dollars=hourly)
+            eye.update(f"waiting for pod {pod_id} to boot")
+            pod = wait_for_runpod_pod(pod_id, search_from=plan.code_path.parent)
+            ssh_target = extract_runpod_ssh_target(pod)
+            if ssh_target is None:
+                raise RuntimeError(f"RunPod pod {pod_id} is running but public SSH mapping was not returned")
+            _append_local_log(local_log, f"Waiting for SSH at root@{ssh_target.host}:{ssh_target.port}.")
+            eye.update(f"waiting for SSH at {ssh_target.host}:{ssh_target.port}")
+            wait_for_ssh(ssh_target, private_key)
+            _append_local_log(local_log, "Uploading code bundle.")
+            eye.update("uploading the code bundle")
+            _upload_bundle(ssh_target, private_key, bundle)
+            _append_local_log(local_log, "Bundle uploaded. Starting remote job.")
+            eye.update("opening the pod bay door")
+            hf_token = (os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or "").strip()
+            job_env = {"HF_TOKEN": hf_token, "HUGGING_FACE_HUB_TOKEN": hf_token} if hf_token else {}
+            remote_pid = _start_remote_job(ssh_target, private_key, env=job_env)
+            _append_local_log(local_log, f"Remote PID {remote_pid}.")
+            eye.update("running your command")
+            while True:
+                status, returncode = _remote_status(ssh_target, private_key)
+                sync_results_from_pod(ssh_target, private_key, plan.results_dir)
+                if status == "done":
+                    final_code = returncode if returncode is not None else 1
+                    _append_local_log(local_log, f"Remote job finished with exit code {final_code}.")
+                    if final_code != 0:
+                        raise RuntimeError(
+                            f"remote job failed with exit code {final_code}; see {plan.results_dir / 'logs'}"
+                        )
+                    delete_pod = not plan.config.keep_pod_on_success
+                    return OpbdhRunResult(
+                        run_id=plan.run_id,
+                        pod_id=pod_id,
+                        gpu_type_id=selected_gpu_type,
+                        results_dir=plan.results_dir,
+                        returncode=final_code,
+                        kept_pod=not delete_pod,
+                    )
+                if status != "running":
+                    raise RuntimeError(f"remote job status became {status!r}")
+                if hourly > 0 and plan.config.max_spend_dollars > 0:
+                    spent = ((time.time() - start) / 3600) * hourly
+                    if spent >= plan.config.max_spend_dollars:
+                        _stop_remote_job(ssh_target, private_key)
+                        raise MaxSpendReached(
+                            f"max spend reached (${spent:.2f} >= ${plan.config.max_spend_dollars:.2f})"
+                        )
+                time.sleep(max(5, int(plan.config.poll_seconds)))
     except Exception as exc:
         _append_local_log(local_log, f"Failure: {exc}")
         if ssh_target is not None:

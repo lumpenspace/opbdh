@@ -5,7 +5,7 @@ import os
 import shlex
 import subprocess
 import time
-import urllib.parse
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -58,8 +58,12 @@ def _runpod_rest(
         },
         method=method,
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        raw = response.read()
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore").strip()
+        raise RuntimeError(f"RunPod API {method} {path} failed with HTTP {exc.code}: {detail or exc.reason}") from exc
     if not raw:
         return None
     return json.loads(raw.decode("utf-8"))
@@ -154,15 +158,26 @@ def delete_runpod_pod(pod_id: str, *, search_from: Path | None = None) -> None:
     _runpod_rest("DELETE", f"/pods/{pod_id}")
 
 
+# Pods are ephemeral and RunPod reuses host:port pairs, so pinning host keys in
+# ~/.ssh/known_hosts would only cause spurious key-changed failures later.
+_SSH_COMMON_OPTIONS = (
+    "-o",
+    "StrictHostKeyChecking=no",
+    "-o",
+    "UserKnownHostsFile=/dev/null",
+    "-o",
+    "LogLevel=ERROR",
+    "-o",
+    "ServerAliveInterval=30",
+    "-o",
+    "ConnectTimeout=10",
+)
+
+
 def ssh_base(ssh_target: RunpodSshTarget, key_path: Path) -> list[str]:
     return [
         "ssh",
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "ServerAliveInterval=30",
-        "-o",
-        "ConnectTimeout=10",
+        *_SSH_COMMON_OPTIONS,
         "-p",
         str(ssh_target.port),
         "-i",
@@ -174,12 +189,7 @@ def ssh_base(ssh_target: RunpodSshTarget, key_path: Path) -> list[str]:
 def scp_base(ssh_target: RunpodSshTarget, key_path: Path) -> list[str]:
     return [
         "scp",
-        "-o",
-        "StrictHostKeyChecking=no",
-        "-o",
-        "ServerAliveInterval=30",
-        "-o",
-        "ConnectTimeout=10",
+        *_SSH_COMMON_OPTIONS,
         "-P",
         str(ssh_target.port),
         "-i",

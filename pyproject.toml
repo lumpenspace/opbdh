@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "opbdh"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Open the Pod Bay Door, Hal: run model-backed scripts on RunPod."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,6 +22,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
   "huggingface-hub>=1.3,<2",
@@ -31,14 +32,17 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/claudiobrandolino/opbdh"
-Issues = "https://github.com/claudiobrandolino/opbdh/issues"
+Homepage = "https://github.com/lumpenspace/opbdh"
+Issues = "https://github.com/lumpenspace/opbdh/issues"
 
 [project.scripts]
 opbdh = "opbdh.cli:main"
 
 [project.optional-dependencies]
 dev = ["build>=1.2", "pytest>=8.0", "ruff>=0.8", "twine>=5.0"]
+
+[tool.hatch.version]
+path = "src/opbdh/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/opbdh"]

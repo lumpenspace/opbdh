@@ -11,8 +11,9 @@ from rich.table import Table
 
 from .config import OpbdhConfig, global_config_path, load_config, save_config
 from .gpu import candidate_gpus
+from .hal import QUOTE_OVERSPEND, QUOTE_REFUSAL, QUOTE_SUCCESS, hal_says
 from .hf import estimate_model_size_gb, suggested_network_volume_gb
-from .runpod import make_plan, plan_summary, run_plan
+from .runpod import MaxSpendReached, make_plan, plan_summary, run_plan
 from .verify import verify_code
 
 
@@ -89,6 +90,7 @@ def verify(
     if result.ok:
         console.print(f"[green]OK[/] checked {len(result.checked)} file(s).")
         return
+    hal_says(QUOTE_REFUSAL)
     for error in result.errors:
         console.print(f"[red]{error}[/]")
     raise typer.Exit(1)
@@ -134,9 +136,16 @@ def _execute_run(config: OpbdhConfig, *, dry_run: bool, yes: bool) -> None:
         console.print(f"[green]Dry run written to[/] {opbdh_plan.results_dir}")
         return
     if not yes and not _confirm_launch(payload):
+        hal_says(QUOTE_REFUSAL)
         raise typer.Exit(1)
-    result = run_plan(opbdh_plan)
+    try:
+        result = run_plan(opbdh_plan)
+    except MaxSpendReached as exc:
+        hal_says(QUOTE_OVERSPEND)
+        console.print(f"[red]{exc}[/] Results synced so far are in {opbdh_plan.results_dir}.")
+        raise typer.Exit(1) from exc
     if result:
+        hal_says(QUOTE_SUCCESS)
         console.print(f"[green]Run complete[/] {result.results_dir}")
 
 
