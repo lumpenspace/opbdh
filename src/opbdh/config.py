@@ -41,8 +41,10 @@ class OpbdhConfig:
     poll_seconds: int = 20
     failure_keepalive_seconds: int = 120
     keep_pod_on_success: bool = False
-    ssh_key: str = "~/.ssh/id_ed25519"
-    ssh_public_key: str = "~/.ssh/id_ed25519.pub"
+    # Empty means auto: discover a standard ~/.ssh key, or generate a dedicated
+    # opbdh keypair under the config dir when none exists.
+    ssh_key: str = ""
+    ssh_public_key: str = ""
 
 
 def config_dir() -> Path:

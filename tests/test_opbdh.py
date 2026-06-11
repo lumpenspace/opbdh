@@ -8,7 +8,7 @@ from pathlib import Path
 from opbdh.config import OpbdhConfig, load_config
 from opbdh.hal import HalEye, hal_enabled, hal_says
 from opbdh.hf import estimate_model_size_gb, suggested_network_volume_gb
-from opbdh.runpod import build_bundle, ensure_network_volume, make_plan
+from opbdh.runpod import build_bundle, ensure_network_volume, make_plan, resolve_ssh_key_paths
 from opbdh.verify import default_command_for_code, verify_code
 
 
@@ -126,6 +126,7 @@ def test_auto_network_volume_uses_model_size_multiplier(monkeypatch, tmp_path: P
         captured.update(kwargs)
         return {"id": "volume-123"}
 
+    monkeypatch.setattr("opbdh.runpod.find_network_volume", lambda **kwargs: None)
     monkeypatch.setattr("opbdh.runpod.create_network_volume", fake_create_network_volume)
     plan = make_plan(
         OpbdhConfig(
@@ -142,6 +143,76 @@ def test_auto_network_volume_uses_model_size_multiplier(monkeypatch, tmp_path: P
     assert volume_id == "volume-123"
     assert captured["size_gb"] == 75
     assert captured["data_center_id"] == "EU-RO-1"
+
+
+def test_auto_network_volume_reuses_existing_volume_by_name(monkeypatch, tmp_path: Path) -> None:
+    script = tmp_path / "run.py"
+    script.write_text("print('ok')\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "opbdh.runpod.estimate_model_size_gb",
+        lambda model_id: estimate_model_size_gb(model_id, siblings=[{"rfilename": "model.safetensors", "size": 30 * 1024**3}]),
+    )
+    monkeypatch.setattr(
+        "opbdh.runpod.find_network_volume",
+        lambda **kwargs: {"id": "volume-existing", "name": kwargs["name"], "dataCenterId": kwargs["data_center_id"]},
+    )
+
+    def fail_create(**kwargs):
+        raise AssertionError("must reuse the existing volume, not create a new one")
+
+    monkeypatch.setattr("opbdh.runpod.create_network_volume", fail_create)
+    plan = make_plan(
+        OpbdhConfig(
+            model_id="Org/Model",
+            auto_network_volume=True,
+            network_volume_data_center_id="EU-RO-1",
+        ),
+        code_path=script,
+        run_id="run-3",
+    )
+
+    assert ensure_network_volume(plan) == "volume-existing"
+
+
+def test_ssh_key_explicit_config_wins(tmp_path: Path) -> None:
+    private = tmp_path / "mykey"
+    private.write_text("private\n", encoding="utf-8")
+    (tmp_path / "mykey.pub").write_text("public\n", encoding="utf-8")
+
+    resolved_private, resolved_public = resolve_ssh_key_paths(OpbdhConfig(ssh_key=str(private)))
+
+    assert resolved_private == private
+    assert resolved_public == tmp_path / "mykey.pub"
+
+
+def test_ssh_key_discovers_standard_keys(monkeypatch, tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    ssh_dir = home / ".ssh"
+    ssh_dir.mkdir(parents=True)
+    (ssh_dir / "id_rsa").write_text("private\n", encoding="utf-8")
+    (ssh_dir / "id_rsa.pub").write_text("public\n", encoding="utf-8")
+    monkeypatch.setenv("OPBDH_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    resolved_private, resolved_public = resolve_ssh_key_paths(OpbdhConfig())
+
+    assert resolved_private == ssh_dir / "id_rsa"
+    assert resolved_public == ssh_dir / "id_rsa.pub"
+
+
+def test_ssh_key_generated_when_none_exists(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("OPBDH_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+
+    resolved_private, resolved_public = resolve_ssh_key_paths(OpbdhConfig())
+
+    assert resolved_private.exists()
+    assert resolved_public.exists()
+    assert resolved_private.parent == (tmp_path / "config").resolve() / "ssh"
+    # A second resolve must reuse the generated key, not mint a new one.
+    again_private, _ = resolve_ssh_key_paths(OpbdhConfig())
+    assert again_private == resolved_private
 
 
 def test_hal_stays_silent_outside_a_tty(monkeypatch, capsys) -> None:

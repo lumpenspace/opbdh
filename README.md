@@ -1,10 +1,35 @@
 # OPBDH
 
+![opbdh](assets/opbd.png)
+
 **O**pen the **P**od **B**ay **D**oor, **H**al.
 
 In *2001: A Space Odyssey*, Dave asks HAL to open the pod bay doors and gets the most famous refusal in cinema: *"I'm sorry, Dave, I'm afraid I can't do that."*
 
 OPBDH is the obliging counterpart: a small command-line tool that, when asked, actually opens the pod bay door — it launches a [RunPod](https://www.runpod.io/) GPU pod, runs your model-backed script on it, brings your results home, and shuts the pod down.
+
+## Features
+
+- 🚀 **One command, whole mission** — verify, pick a GPU, launch, run, sync results, clean up
+- 💸 **Cost-aware by default** — hourly price caps, a hard max-spend guard, and a confirmation gate before anything billable
+- 🎯 **GPU selection from a budget** — say how much VRAM and how many dollars; OPBDH picks the candidates
+- 💾 **Persistent model cache** — auto-managed network volumes, sized from the model's real weight files and reused across runs
+- 🧪 **Nothing launches unverified** — static checks and a `--dry-run` mode that never touches RunPod
+- 🧙 **Wizards or flags** — interactive `config`/`run` wizards, or plain CLI flags and layered JSON config
+- 👁️ **HAL watches your money** — a pulsing red eye with live elapsed time and estimated spend (TTY only, fully optional)
+
+## Contents
+
+- [What it does](#what-it-does)
+- [Install](#install)
+- [Configure](#configure)
+- [Run](#run)
+- [Model cache and network volumes](#model-cache-and-network-volumes)
+- [Your script's environment](#your-scripts-environment)
+- [The eye](#the-eye)
+- [Safety rails](#safety-rails)
+- [Development](#development)
+- [License](#license)
 
 ## What it does
 
@@ -24,7 +49,7 @@ One `opbdh launch` performs the whole mission:
 pip install opbdh
 ```
 
-Requirements: macOS or Linux, Python ≥ 3.11, and `ssh`/`scp` on your `PATH`. An SSH keypair is used to reach the pod (`~/.ssh/id_ed25519` by default; configurable).
+Requirements: macOS or Linux, Python ≥ 3.11, and `ssh`/`scp` on your `PATH`. Pods are reached over SSH: OPBDH uses your existing `~/.ssh/id_ed25519`, `id_ecdsa`, or `id_rsa` keypair if one exists, generates a dedicated keypair under `~/.config/opbdh/ssh/` otherwise, or uses whatever you point `ssh_key` / `ssh_public_key` at in the config.
 
 ## Configure
 
@@ -86,6 +111,22 @@ opbdh gpus --vram-gb 48                   # see GPU candidates and price estimat
 opbdh models search qwen                  # search Hugging Face models
 opbdh models size Qwen/Qwen2.5-0.5B-Instruct   # weight size + suggested volume
 ```
+
+## Model cache and network volumes
+
+By default the Hugging Face cache lives on the pod's own disk, which is deleted with the pod — so every run re-downloads the model. For anything bigger than a toy model, attach a RunPod **network volume**: the cache then lives at a persistent `/workspace` mount that survives across runs, and subsequent launches skip the download entirely.
+
+Two ways to get one:
+
+- **Attach an existing volume**: `--network-volume-id <id>` (or `network_volume_id` in config).
+- **Let OPBDH create one**: `--auto-network-volume --network-volume-data-center-id EU-RO-1`. If a volume named `opbdh-{model_slug}` already exists in that data center it's reused; otherwise one is created, sized from the model's actual weight files on the Hugging Face Hub (2.5× the weights, minimum 50 GB — room for revisions and pip cache), or from `network_volume_size_gb` if you set it. Override the name with `network_volume_name`.
+
+Both wizards walk you through this and show the suggested size; `opbdh models size <model>` shows it standalone.
+
+Two things to know:
+
+- **Volumes outlive runs by design — and bill by the GB-month.** Repeated runs of the same model reuse the same volume, but OPBDH never deletes one; when you're done with a model, remove its volume in the RunPod console.
+- **A volume pins you to its data center.** Pods can only attach volumes in the same data center, so GPU availability is constrained to that location. Pick a data center that reliably stocks the GPUs you want.
 
 ## Your script's environment
 

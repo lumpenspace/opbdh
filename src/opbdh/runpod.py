@@ -29,7 +29,7 @@ from .remote import (
     wait_for_ssh,
 )
 
-from .config import OpbdhConfig, model_slug
+from .config import OpbdhConfig, config_dir, model_slug
 from .gpu import candidate_gpus, estimated_hourly
 from .hal import HalEye
 from .hf import estimate_model_size_gb, suggested_network_volume_gb
@@ -185,6 +185,16 @@ def build_bundle(config: OpbdhConfig, *, code_path: Path, command: str, run_id: 
     return buffer.getvalue()
 
 
+def find_network_volume(*, name: str, data_center_id: str, search_from: Path | None = None) -> dict[str, Any] | None:
+    payload = _runpod_rest("GET", "/networkvolumes", search_from=search_from)
+    if not isinstance(payload, list):
+        return None
+    for volume in payload:
+        if isinstance(volume, dict) and volume.get("name") == name and volume.get("dataCenterId") == data_center_id:
+            return volume
+    return None
+
+
 def create_network_volume(*, name: str, data_center_id: str, size_gb: int, search_from: Path | None = None) -> dict[str, Any]:
     payload = _runpod_rest(
         "POST",
@@ -235,14 +245,49 @@ def make_plan(config: OpbdhConfig, *, code_path: Path, run_id: str | None = None
     )
 
 
-def _ssh_key_paths(config: OpbdhConfig) -> tuple[Path, Path]:
-    private_key = Path(config.ssh_key).expanduser()
-    public_key = Path(config.ssh_public_key).expanduser()
-    if not private_key.exists():
-        raise FileNotFoundError(f"RunPod SSH private key not found: {private_key}")
-    if not public_key.exists():
-        raise FileNotFoundError(f"RunPod SSH public key not found: {public_key}")
-    return private_key, public_key
+_STANDARD_SSH_KEY_NAMES = ("id_ed25519", "id_ecdsa", "id_rsa")
+
+
+def resolve_ssh_key_paths(config: OpbdhConfig) -> tuple[Path, Path]:
+    if config.ssh_key.strip():
+        private_key = Path(config.ssh_key).expanduser()
+        public_key = (
+            Path(config.ssh_public_key).expanduser()
+            if config.ssh_public_key.strip()
+            else Path(f"{private_key}.pub")
+        )
+        if not private_key.exists():
+            raise FileNotFoundError(f"RunPod SSH private key not found: {private_key}")
+        if not public_key.exists():
+            raise FileNotFoundError(f"RunPod SSH public key not found: {public_key}")
+        return private_key, public_key
+
+    candidates = [Path.home() / ".ssh" / name for name in _STANDARD_SSH_KEY_NAMES]
+    candidates.append(config_dir() / "ssh" / "id_ed25519")
+    for private_key in candidates:
+        public_key = Path(f"{private_key}.pub")
+        if private_key.exists() and public_key.exists():
+            return private_key, public_key
+    return _generate_opbdh_ssh_key()
+
+
+def _generate_opbdh_ssh_key() -> tuple[Path, Path]:
+    key_dir = config_dir() / "ssh"
+    key_dir.mkdir(parents=True, exist_ok=True)
+    key_dir.chmod(0o700)
+    private_key = key_dir / "id_ed25519"
+    try:
+        subprocess.run(
+            ["ssh-keygen", "-t", "ed25519", "-N", "", "-q", "-C", "opbdh", "-f", str(private_key)],
+            check=True,
+            capture_output=True,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "No SSH keypair found and ssh-keygen is unavailable; "
+            "set ssh_key/ssh_public_key in the config to an existing keypair."
+        ) from exc
+    return private_key, Path(f"{private_key}.pub")
 
 
 def _upload_bundle(ssh_target: RunpodSshTarget, key_path: Path, bundle: bytes) -> None:
@@ -378,6 +423,13 @@ def ensure_network_volume(plan: OpbdhPlan) -> str:
         raise ValueError("--network-volume-data-center-id is required when --auto-network-volume creates a disk.")
     size_gb = plan.network_volume_size_gb or plan.config.pod_volume_gb
     volume_name = plan.config.network_volume_name or f"opbdh-{model_slug(plan.config.model_id)}"
+    existing = find_network_volume(
+        name=volume_name,
+        data_center_id=plan.config.network_volume_data_center_id,
+        search_from=plan.code_path.parent,
+    )
+    if existing:
+        return str(existing["id"])
     created = create_network_volume(
         name=volume_name,
         data_center_id=plan.config.network_volume_data_center_id,
@@ -398,7 +450,7 @@ def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None
         _append_local_log(local_log, "Dry run requested; not contacting RunPod.")
         return None
 
-    private_key, public_key = _ssh_key_paths(plan.config)
+    private_key, public_key = resolve_ssh_key_paths(plan.config)
     public_key_text = public_key.read_text(encoding="utf-8").strip()
     pod_id = ""
     ssh_target: RunpodSshTarget | None = None
