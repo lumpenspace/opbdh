@@ -1,0 +1,11 @@
+.DS_Store
+.pytest_cache/
+.ruff_cache/
+.venv/
+__pycache__/
+*.egg-info/
+build/
+dist/
+runpod_results/
+.env
+.env.local
