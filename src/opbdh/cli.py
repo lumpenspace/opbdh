@@ -266,17 +266,24 @@ def _execute_run(config: OpbdhConfig, *, dry_run: bool, yes: bool) -> None:
                 
             if is_remote_job_err:
                 console.print(f"\n[red]Execution Error:[/] {msg}")
+                
+                stdout_path = opbdh_plan.results_dir / "logs" / "stdout.log"
+                if stdout_path.exists():
+                    stdout_content = stdout_path.read_text(encoding="utf-8").strip()
+                    if stdout_content:
+                        lines = stdout_content.splitlines()
+                        if len(lines) > 20:
+                            stdout_content = "(... truncated ...)\n" + "\n".join(lines[-20:])
+                            console.print(f"\n[dim]Remote Standard Output (last 20 lines):[/]\n{stdout_content}")
+                        else:
+                            console.print(f"\n[dim]Remote Standard Output:[/]\n{stdout_content}")
+                            
                 stderr_path = opbdh_plan.results_dir / "logs" / "stderr.log"
                 if stderr_path.exists():
                     stderr_content = stderr_path.read_text(encoding="utf-8").strip()
                     if stderr_content:
                         console.print(f"\n[red]Remote Standard Error:[/]\n{stderr_content}")
                 
-                stdout_path = opbdh_plan.results_dir / "logs" / "stdout.log"
-                if stdout_path.exists():
-                    stdout_content = stdout_path.read_text(encoding="utf-8").strip()
-                    if stdout_content:
-                        console.print(f"\n[dim]Remote Standard Output:[/]\n{stdout_content}")
                 raise typer.Exit(1)
                 
             if is_volume_err or is_pod_err:
