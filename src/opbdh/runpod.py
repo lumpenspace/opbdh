@@ -469,11 +469,20 @@ def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None
             )
             _append_local_log(local_log, "Requesting RunPod pod.")
             eye.update("requesting a pod")
+            # Respect OPBDH_RUNPOD_GPU_TYPES env var to pin specific GPU (e.g. avoid broken machines)
+            import os as _os
+            _gpu_override = _os.environ.get("OPBDH_RUNPOD_GPU_TYPES", "").strip()
+            if _gpu_override:
+                _override_list = [g.strip() for g in _gpu_override.split(",") if g.strip()]
+                _filtered = [g for g in plan.gpu_type_ids if g in _override_list]
+                _effective_gpu_types = _filtered if _filtered else plan.gpu_type_ids
+            else:
+                _effective_gpu_types = plan.gpu_type_ids
             pod_id, ssh_label, selected_gpu_type = create_runpod_pod(
                 name=f"opbdh-{plan.run_id}",
                 cloud_type=plan.config.cloud_type,
                 public_key=public_key_text,
-                gpu_types=plan.gpu_type_ids,
+                gpu_types=_effective_gpu_types,
                 image=plan.config.image,
                 volume_gb=plan.config.pod_volume_gb,
                 container_disk_gb=plan.config.container_disk_gb,
