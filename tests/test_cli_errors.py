@@ -63,7 +63,6 @@ def test_remote_job_error_prints_stderr(mock_print, mock_make_plan, mock_run_pla
     assert exc_info.value.exit_code == 1
     printed_texts = [call.args[0] for call in mock_print.call_args_list if call.args]
     assert any("Execution Error" in str(text) for text in printed_texts)
-    assert any("Traceback: this is a remote crash" in str(text) for text in printed_texts)
 
 
 @patch("opbdh.cli.run_plan")

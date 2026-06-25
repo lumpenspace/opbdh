@@ -104,6 +104,9 @@ def _add_code_to_tar(archive: tarfile.TarFile, code_path: Path) -> None:
     code_path = code_path.expanduser().resolve()
     if code_path.is_file():
         archive.add(code_path, arcname=str(Path("user") / code_path.name), filter=_reset_tar_info)
+        req_path = code_path.parent / "requirements.txt"
+        if req_path.is_file():
+            archive.add(req_path, arcname="user/requirements.txt", filter=_reset_tar_info)
         return
     for path in sorted(code_path.rglob("*")):
         relative = path.relative_to(code_path)
@@ -549,8 +552,30 @@ def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None
             except Exception as sync_exc:
                 _append_local_log(local_log, f"Failure sync failed: {sync_exc}")
         if pod_id and ssh_target is not None:
+            if isinstance(exc, RuntimeError) and "remote job failed with exit code" in str(exc):
+                try:
+                    from rich.console import Console
+                    console = Console()
+                    stdout_path = plan.results_dir / "logs" / "stdout.log"
+                    if stdout_path.exists():
+                        stdout_content = stdout_path.read_text(encoding="utf-8").strip()
+                        if stdout_content:
+                            lines = stdout_content.splitlines()
+                            if len(lines) > 20:
+                                stdout_content = "(... truncated ...)\n" + "\n".join(lines[-20:])
+                                console.print(f"\n[dim]Remote Standard Output (last 20 lines):[/]\n{stdout_content}")
+                            else:
+                                console.print(f"\n[dim]Remote Standard Output:[/]\n{stdout_content}")
+                    stderr_path = plan.results_dir / "logs" / "stderr.log"
+                    if stderr_path.exists():
+                        stderr_content = stderr_path.read_text(encoding="utf-8").strip()
+                        if stderr_content:
+                            console.print(f"\n[red]Remote Standard Error:[/]\n{stderr_content}")
+                except Exception:
+                    pass
+
             keep = _timed_yes_no(
-                f"Run failed. Keep RunPod pod {pod_id} running for debugging?",
+                f"\nRun failed. Keep RunPod pod {pod_id} running for debugging?",
                 timeout_seconds=max(1, int(plan.config.failure_keepalive_seconds)),
                 default=False,
             )
