@@ -11,7 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .config import DEFAULT_RUNPOD_CONTAINER_DISK_GB, DEFAULT_RUNPOD_IMAGE, DEFAULT_RUNPOD_VOLUME_GB
+from .config import (
+    DEFAULT_RUNPOD_CONTAINER_DISK_GB,
+    DEFAULT_RUNPOD_IMAGE,
+    DEFAULT_RUNPOD_MIN_RAM_PER_GPU_GB,
+    DEFAULT_RUNPOD_MIN_VCPU_PER_GPU,
+    DEFAULT_RUNPOD_VOLUME_GB,
+)
 
 
 DEFAULT_RUNPOD_GPU_TYPES = (
@@ -85,6 +91,8 @@ def create_runpod_pod(
     image: str | None = None,
     volume_gb: int | None = None,
     container_disk_gb: int | None = None,
+    min_vcpu_per_gpu: int | None = None,
+    min_ram_per_gpu_gb: int | None = None,
     network_volume_id: str | None = None,
     search_from: Path | None = None,
 ) -> tuple[str, str, str]:
@@ -101,8 +109,8 @@ def create_runpod_pod(
                 "gpuTypeIds": [gpu_type],
                 "gpuTypePriority": "availability",
                 "containerDiskInGb": int(container_disk_gb) if container_disk_gb is not None else DEFAULT_RUNPOD_CONTAINER_DISK_GB,
-                "minVCPUPerGPU": 4,
-                "minRAMPerGPU": 24,
+                "minVCPUPerGPU": int(min_vcpu_per_gpu) if min_vcpu_per_gpu is not None else DEFAULT_RUNPOD_MIN_VCPU_PER_GPU,
+                "minRAMPerGPU": int(min_ram_per_gpu_gb) if min_ram_per_gpu_gb is not None else DEFAULT_RUNPOD_MIN_RAM_PER_GPU_GB,
                 "name": name[:190],
                 "imageName": (image or "").strip() or DEFAULT_RUNPOD_IMAGE,
                 "ports": ["22/tcp"],

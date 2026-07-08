@@ -489,6 +489,8 @@ def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None
                 image=plan.config.image,
                 volume_gb=plan.config.pod_volume_gb,
                 container_disk_gb=plan.config.container_disk_gb,
+                min_vcpu_per_gpu=plan.config.min_vcpu_per_gpu,
+                min_ram_per_gpu_gb=plan.config.min_ram_per_gpu_gb,
                 network_volume_id=network_volume_id,
                 search_from=plan.code_path.parent,
             )
