@@ -63,6 +63,8 @@ def plan(
     vram_gb: int | None = typer.Option(None, "--vram-gb", help="Minimum GPU VRAM."),
     max_dollars_per_hour: float | None = typer.Option(None, "--max-dollars-per-hour", help="Estimated hourly cap."),
     max_spend: float | None = typer.Option(None, "--max-spend", help="Spend guard for this run."),
+    min_vcpu_per_gpu: int | None = typer.Option(None, "--min-vcpu-per-gpu", help="Minimum host vCPUs per GPU."),
+    min_ram_per_gpu: int | None = typer.Option(None, "--min-ram-per-gpu", help="Minimum host RAM per GPU, in GB."),
 ) -> None:
     cfg = load_config(
         local_config=config_file,
@@ -73,6 +75,8 @@ def plan(
             vram_gb=vram_gb,
             max_dollars_per_hour=max_dollars_per_hour,
             max_spend_dollars=max_spend,
+            min_vcpu_per_gpu=min_vcpu_per_gpu,
+            min_ram_per_gpu_gb=min_ram_per_gpu,
         ),
     )
     if not cfg.code:
@@ -108,6 +112,8 @@ def _load_run_config(
     network_volume_id: str | None,
     auto_network_volume: bool | None,
     network_volume_data_center_id: str | None,
+    min_vcpu_per_gpu: int | None = None,
+    min_ram_per_gpu: int | None = None,
 ) -> OpbdhConfig:
     return load_config(
         local_config=config_file,
@@ -121,6 +127,8 @@ def _load_run_config(
             network_volume_id=network_volume_id,
             auto_network_volume=auto_network_volume,
             network_volume_data_center_id=network_volume_data_center_id,
+            min_vcpu_per_gpu=min_vcpu_per_gpu,
+            min_ram_per_gpu_gb=min_ram_per_gpu,
         ),
     )
 
@@ -412,6 +420,8 @@ def run_now(
         "--network-volume-data-center-id",
         help="RunPod data center id for auto-created volumes, for example EU-RO-1.",
     ),
+    min_vcpu_per_gpu: int | None = typer.Option(None, "--min-vcpu-per-gpu", help="Minimum host vCPUs per GPU."),
+    min_ram_per_gpu: int | None = typer.Option(None, "--min-ram-per-gpu", help="Minimum host RAM per GPU, in GB."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Verify and print the plan without contacting RunPod."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip billable-compute confirmation."),
 ) -> None:
@@ -426,6 +436,8 @@ def run_now(
         network_volume_id=network_volume_id,
         auto_network_volume=auto_network_volume,
         network_volume_data_center_id=network_volume_data_center_id,
+        min_vcpu_per_gpu=min_vcpu_per_gpu,
+        min_ram_per_gpu=min_ram_per_gpu,
     )
     _execute_run(cfg, dry_run=dry_run, yes=yes)
 
@@ -442,6 +454,8 @@ def launch(
     network_volume_id: str | None = typer.Option(None, "--network-volume-id", help="Existing RunPod network volume id."),
     auto_network_volume: bool | None = typer.Option(None, "--auto-network-volume/--no-auto-network-volume"),
     network_volume_data_center_id: str | None = typer.Option(None, "--network-volume-data-center-id"),
+    min_vcpu_per_gpu: int | None = typer.Option(None, "--min-vcpu-per-gpu", help="Minimum host vCPUs per GPU."),
+    min_ram_per_gpu: int | None = typer.Option(None, "--min-ram-per-gpu", help="Minimum host RAM per GPU, in GB."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Verify and print the plan without contacting RunPod."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip billable-compute confirmation."),
 ) -> None:
@@ -457,6 +471,8 @@ def launch(
         network_volume_id=network_volume_id,
         auto_network_volume=auto_network_volume,
         network_volume_data_center_id=network_volume_data_center_id,
+        min_vcpu_per_gpu=min_vcpu_per_gpu,
+        min_ram_per_gpu=min_ram_per_gpu,
     )
     _execute_run(cfg, dry_run=dry_run, yes=yes)
 

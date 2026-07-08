@@ -11,6 +11,8 @@ from typing import Any
 DEFAULT_RUNPOD_CONTAINER_DISK_GB = 120
 DEFAULT_RUNPOD_IMAGE = "runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04"
 DEFAULT_RUNPOD_VOLUME_GB = 160
+DEFAULT_RUNPOD_MIN_VCPU_PER_GPU = 4
+DEFAULT_RUNPOD_MIN_RAM_PER_GPU_GB = 24
 LOCAL_CONFIG_NAMES = ("opbdh.json", ".opbdh.json")
 
 
@@ -31,6 +33,8 @@ class OpbdhConfig:
     max_spend_dollars: float = 5.0
     container_disk_gb: int = DEFAULT_RUNPOD_CONTAINER_DISK_GB
     pod_volume_gb: int = DEFAULT_RUNPOD_VOLUME_GB
+    min_vcpu_per_gpu: int = DEFAULT_RUNPOD_MIN_VCPU_PER_GPU
+    min_ram_per_gpu_gb: int = DEFAULT_RUNPOD_MIN_RAM_PER_GPU_GB
     network_volume_id: str = ""
     auto_network_volume: bool = False
     network_volume_data_center_id: str = ""
