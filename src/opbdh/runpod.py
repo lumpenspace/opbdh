@@ -104,6 +104,9 @@ def _add_code_to_tar(archive: tarfile.TarFile, code_path: Path) -> None:
     code_path = code_path.expanduser().resolve()
     if code_path.is_file():
         archive.add(code_path, arcname=str(Path("user") / code_path.name), filter=_reset_tar_info)
+        req_path = code_path.parent / "requirements.txt"
+        if req_path.is_file():
+            archive.add(req_path, arcname="user/requirements.txt", filter=_reset_tar_info)
         return
     for path in sorted(code_path.rglob("*")):
         relative = path.relative_to(code_path)
@@ -469,11 +472,20 @@ def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None
             )
             _append_local_log(local_log, "Requesting RunPod pod.")
             eye.update("requesting a pod")
+            # Respect OPBDH_RUNPOD_GPU_TYPES env var to pin specific GPU (e.g. avoid broken machines)
+            import os as _os
+            _gpu_override = _os.environ.get("OPBDH_RUNPOD_GPU_TYPES", "").strip()
+            if _gpu_override:
+                _override_list = [g.strip() for g in _gpu_override.split(",") if g.strip()]
+                _filtered = [g for g in plan.gpu_type_ids if g in _override_list]
+                _effective_gpu_types = _filtered if _filtered else plan.gpu_type_ids
+            else:
+                _effective_gpu_types = plan.gpu_type_ids
             pod_id, ssh_label, selected_gpu_type = create_runpod_pod(
                 name=f"opbdh-{plan.run_id}",
                 cloud_type=plan.config.cloud_type,
                 public_key=public_key_text,
-                gpu_types=plan.gpu_type_ids,
+                gpu_types=_effective_gpu_types,
                 image=plan.config.image,
                 volume_gb=plan.config.pod_volume_gb,
                 container_disk_gb=plan.config.container_disk_gb,
@@ -540,8 +552,30 @@ def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None
             except Exception as sync_exc:
                 _append_local_log(local_log, f"Failure sync failed: {sync_exc}")
         if pod_id and ssh_target is not None:
+            if isinstance(exc, RuntimeError) and "remote job failed with exit code" in str(exc):
+                try:
+                    from rich.console import Console
+                    console = Console()
+                    stdout_path = plan.results_dir / "logs" / "stdout.log"
+                    if stdout_path.exists():
+                        stdout_content = stdout_path.read_text(encoding="utf-8").strip()
+                        if stdout_content:
+                            lines = stdout_content.splitlines()
+                            if len(lines) > 20:
+                                stdout_content = "(... truncated ...)\n" + "\n".join(lines[-20:])
+                                console.print(f"\n[dim]Remote Standard Output (last 20 lines):[/]\n{stdout_content}")
+                            else:
+                                console.print(f"\n[dim]Remote Standard Output:[/]\n{stdout_content}")
+                    stderr_path = plan.results_dir / "logs" / "stderr.log"
+                    if stderr_path.exists():
+                        stderr_content = stderr_path.read_text(encoding="utf-8").strip()
+                        if stderr_content:
+                            console.print(f"\n[red]Remote Standard Error:[/]\n{stderr_content}")
+                except Exception:
+                    pass
+
             keep = _timed_yes_no(
-                f"Run failed. Keep RunPod pod {pod_id} running for debugging?",
+                f"\nRun failed. Keep RunPod pod {pod_id} running for debugging?",
                 timeout_seconds=max(1, int(plan.config.failure_keepalive_seconds)),
                 default=False,
             )
