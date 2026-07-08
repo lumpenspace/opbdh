@@ -259,7 +259,7 @@ def _execute_run(config: OpbdhConfig, *, dry_run: bool, yes: bool) -> None:
             is_remote_job_err = "remote job failed with exit code" in msg
             
             if is_balance_err:
-                console.print(f"\n[red]Insufficient RunPod Balance:[/] Your account does not have enough funds to launch this pod.")
+                console.print("\n[red]Insufficient RunPod Balance:[/] Your account does not have enough funds to launch this pod.")
                 console.print(f"[dim]RunPod API details: {msg}[/]")
                 console.print("[yellow]Please add funds to your RunPod account to continue.[/]")
                 raise typer.Exit(1)
