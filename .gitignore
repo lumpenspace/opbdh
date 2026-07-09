@@ -10,3 +10,4 @@ runpod_results/
 .env
 .env.*
 .claude/
+.vercel/
