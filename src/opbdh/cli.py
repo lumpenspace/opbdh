@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from .config import OpbdhConfig, global_config_path, load_config, save_config
+from .estimate import GOALS, estimate_for_model
 from .gpu import candidate_gpus
 from .hal import QUOTE_OVERSPEND, QUOTE_REFUSAL, QUOTE_SUCCESS, hal_says
 from .hf import estimate_model_size_gb, suggested_network_volume_gb
@@ -25,6 +27,21 @@ app.add_typer(run_app, name="run")
 app.add_typer(config_app, name="config")
 app.add_typer(models_app, name="models")
 console = Console()
+
+
+def _stdin_is_tty() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+@app.callback(invoke_without_command=True)
+def _root(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
+    from . import setup_wizard
+
+    if not setup_wizard.is_configured() and _stdin_is_tty():
+        raise typer.Exit(setup_wizard.run_setup_wizard())
+    console.print(ctx.get_help())
 
 
 def _overrides(**kwargs: Any) -> dict[str, Any]:
@@ -59,12 +76,13 @@ def plan(
     code: Path | None = typer.Argument(None, help="Code file or directory to upload."),
     config_file: Path | None = typer.Option(None, "--config", "-c", help="Local OPBDH JSON config."),
     model: str | None = typer.Option(None, "--model", "-m", help="Hugging Face model id."),
-    command: str | None = typer.Option(None, "--command", help="Remote shell command. Defaults from code path."),
-    vram_gb: int | None = typer.Option(None, "--vram-gb", help="Minimum GPU VRAM."),
-    max_dollars_per_hour: float | None = typer.Option(None, "--max-dollars-per-hour", help="Estimated hourly cap."),
-    max_spend: float | None = typer.Option(None, "--max-spend", help="Spend guard for this run."),
-    min_vcpu_per_gpu: int | None = typer.Option(None, "--min-vcpu-per-gpu", help="Minimum host vCPUs per GPU."),
-    min_ram_per_gpu: int | None = typer.Option(None, "--min-ram-per-gpu", help="Minimum host RAM per GPU, in GB."),
+    command: str | None = typer.Option(None, "--command", "-x", help="Remote shell command. Defaults from code path."),
+    provider: str | None = typer.Option(None, "--provider", "-p", help="Compute provider: runpod or primeintellect."),
+    vram_gb: int | None = typer.Option(None, "--vram-gb", "-v", help="Minimum GPU VRAM."),
+    max_dollars_per_hour: float | None = typer.Option(None, "--max-dollars-per-hour", "-d", help="Estimated hourly cap."),
+    max_spend: float | None = typer.Option(None, "--max-spend", "-s", help="Spend guard for this run."),
+    min_vcpu_per_gpu: int | None = typer.Option(None, "--min-vcpu-per-gpu", "-u", help="Minimum host vCPUs per GPU."),
+    min_ram_per_gpu: int | None = typer.Option(None, "--min-ram-per-gpu", "-r", help="Minimum host RAM per GPU, in GB."),
 ) -> None:
     cfg = load_config(
         local_config=config_file,
@@ -72,6 +90,7 @@ def plan(
             model_id=model,
             code=str(code) if code else None,
             command=command,
+            provider=provider,
             vram_gb=vram_gb,
             max_dollars_per_hour=max_dollars_per_hour,
             max_spend_dollars=max_spend,
@@ -82,13 +101,14 @@ def plan(
     if not cfg.code:
         raise typer.BadParameter("Code path is required, either as an argument or config.code.")
     opbdh_plan = make_plan(cfg, code_path=Path(cfg.code))
+    _warn_ignored_volume_options(cfg)
     _print_plan(plan_summary(opbdh_plan))
 
 
 @app.command()
 def verify(
     code: Path = typer.Argument(..., help="Code file or directory to statically verify."),
-    command: str = typer.Option("", "--command", help="Remote command, if the path needs one."),
+    command: str = typer.Option("", "--command", "-x", help="Remote command, if the path needs one."),
 ) -> None:
     result = verify_code(code, command=command)
     if result.ok:
@@ -114,6 +134,7 @@ def _load_run_config(
     network_volume_data_center_id: str | None,
     min_vcpu_per_gpu: int | None = None,
     min_ram_per_gpu: int | None = None,
+    provider: str | None = None,
 ) -> OpbdhConfig:
     return load_config(
         local_config=config_file,
@@ -121,6 +142,7 @@ def _load_run_config(
             model_id=model,
             code=str(code) if code else None,
             command=command,
+            provider=provider,
             vram_gb=vram_gb,
             max_dollars_per_hour=max_dollars_per_hour,
             max_spend_dollars=max_spend,
@@ -232,12 +254,22 @@ def _prompt_existing_network_volume(opbdh_plan, yes: bool, dry_run: bool) -> Non
                             import typer
                             raise typer.Exit(1)
 
+def _warn_ignored_volume_options(config: OpbdhConfig) -> None:
+    if (config.provider.strip().lower() or "runpod") != "runpod" and (config.auto_network_volume or config.network_volume_id.strip()):
+        console.print(
+            "[yellow]Note:[/] network volumes are RunPod-only; ignoring the configured "
+            "network volume options for this provider. The model will download to the pod's own disk."
+        )
+
+
 def _execute_run(config: OpbdhConfig, *, dry_run: bool, yes: bool) -> None:
     if not config.code:
         raise typer.BadParameter("Code path is required, either as an argument or config.code.")
     opbdh_plan = make_plan(config, code_path=Path(config.code))
-    
-    _prompt_existing_network_volume(opbdh_plan, yes, dry_run)
+    _warn_ignored_volume_options(config)
+
+    if config.provider.strip().lower() == "runpod":
+        _prompt_existing_network_volume(opbdh_plan, yes, dry_run)
 
     payload = plan_summary(opbdh_plan)
     _print_plan(payload)
@@ -267,9 +299,10 @@ def _execute_run(config: OpbdhConfig, *, dry_run: bool, yes: bool) -> None:
             is_remote_job_err = "remote job failed with exit code" in msg
             
             if is_balance_err:
-                console.print("\n[red]Insufficient RunPod Balance:[/] Your account does not have enough funds to launch this pod.")
-                console.print(f"[dim]RunPod API details: {msg}[/]")
-                console.print("[yellow]Please add funds to your RunPod account to continue.[/]")
+                provider_name = "Prime Intellect" if config.provider.strip().lower() == "primeintellect" else "RunPod"
+                console.print(f"\n[red]Insufficient {provider_name} Balance:[/] Your account does not have enough funds to launch this pod.")
+                console.print(f"[dim]{provider_name} API details: {msg}[/]")
+                console.print(f"[yellow]Please add funds to your {provider_name} account to continue.[/]")
                 raise typer.Exit(1)
                 
             if is_remote_job_err:
@@ -405,24 +438,25 @@ def run_now(
     code: Path | None = typer.Argument(None, help="Code file or directory to upload."),
     config_file: Path | None = typer.Option(None, "--config", "-c", help="Local OPBDH JSON config."),
     model: str | None = typer.Option(None, "--model", "-m", help="Hugging Face model id."),
-    command: str | None = typer.Option(None, "--command", help="Remote shell command. Defaults from code path."),
-    vram_gb: int | None = typer.Option(None, "--vram-gb", help="Minimum GPU VRAM."),
-    max_dollars_per_hour: float | None = typer.Option(None, "--max-dollars-per-hour", help="Estimated hourly cap."),
-    max_spend: float | None = typer.Option(None, "--max-spend", help="Spend guard for this run."),
-    network_volume_id: str | None = typer.Option(None, "--network-volume-id", help="Existing RunPod network volume id."),
+    command: str | None = typer.Option(None, "--command", "-x", help="Remote shell command. Defaults from code path."),
+    provider: str | None = typer.Option(None, "--provider", "-p", help="Compute provider: runpod or primeintellect."),
+    vram_gb: int | None = typer.Option(None, "--vram-gb", "-v", help="Minimum GPU VRAM."),
+    max_dollars_per_hour: float | None = typer.Option(None, "--max-dollars-per-hour", "-d", help="Estimated hourly cap."),
+    max_spend: float | None = typer.Option(None, "--max-spend", "-s", help="Spend guard for this run."),
+    network_volume_id: str | None = typer.Option(None, "--network-volume-id", "-V", help="Existing RunPod network volume id."),
     auto_network_volume: bool | None = typer.Option(
         None,
-        "--auto-network-volume/--no-auto-network-volume",
+        "--auto-network-volume/--no-auto-network-volume", "-a/-A",
         help="Create a network volume if none is configured.",
     ),
     network_volume_data_center_id: str | None = typer.Option(
         None,
-        "--network-volume-data-center-id",
+        "--network-volume-data-center-id", "-D",
         help="RunPod data center id for auto-created volumes, for example EU-RO-1.",
     ),
-    min_vcpu_per_gpu: int | None = typer.Option(None, "--min-vcpu-per-gpu", help="Minimum host vCPUs per GPU."),
-    min_ram_per_gpu: int | None = typer.Option(None, "--min-ram-per-gpu", help="Minimum host RAM per GPU, in GB."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Verify and print the plan without contacting RunPod."),
+    min_vcpu_per_gpu: int | None = typer.Option(None, "--min-vcpu-per-gpu", "-u", help="Minimum host vCPUs per GPU."),
+    min_ram_per_gpu: int | None = typer.Option(None, "--min-ram-per-gpu", "-r", help="Minimum host RAM per GPU, in GB."),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Verify and print the plan without contacting RunPod."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip billable-compute confirmation."),
 ) -> None:
     cfg = _load_run_config(
@@ -438,6 +472,7 @@ def run_now(
         network_volume_data_center_id=network_volume_data_center_id,
         min_vcpu_per_gpu=min_vcpu_per_gpu,
         min_ram_per_gpu=min_ram_per_gpu,
+        provider=provider,
     )
     _execute_run(cfg, dry_run=dry_run, yes=yes)
 
@@ -447,16 +482,17 @@ def launch(
     code: Path | None = typer.Argument(None, help="Code file or directory to upload."),
     config_file: Path | None = typer.Option(None, "--config", "-c", help="Local OPBDH JSON config."),
     model: str | None = typer.Option(None, "--model", "-m", help="Hugging Face model id."),
-    command: str | None = typer.Option(None, "--command", help="Remote shell command. Defaults from code path."),
-    vram_gb: int | None = typer.Option(None, "--vram-gb", help="Minimum GPU VRAM."),
-    max_dollars_per_hour: float | None = typer.Option(None, "--max-dollars-per-hour", help="Estimated hourly cap."),
-    max_spend: float | None = typer.Option(None, "--max-spend", help="Spend guard for this run."),
-    network_volume_id: str | None = typer.Option(None, "--network-volume-id", help="Existing RunPod network volume id."),
-    auto_network_volume: bool | None = typer.Option(None, "--auto-network-volume/--no-auto-network-volume"),
-    network_volume_data_center_id: str | None = typer.Option(None, "--network-volume-data-center-id"),
-    min_vcpu_per_gpu: int | None = typer.Option(None, "--min-vcpu-per-gpu", help="Minimum host vCPUs per GPU."),
-    min_ram_per_gpu: int | None = typer.Option(None, "--min-ram-per-gpu", help="Minimum host RAM per GPU, in GB."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Verify and print the plan without contacting RunPod."),
+    command: str | None = typer.Option(None, "--command", "-x", help="Remote shell command. Defaults from code path."),
+    provider: str | None = typer.Option(None, "--provider", "-p", help="Compute provider: runpod or primeintellect."),
+    vram_gb: int | None = typer.Option(None, "--vram-gb", "-v", help="Minimum GPU VRAM."),
+    max_dollars_per_hour: float | None = typer.Option(None, "--max-dollars-per-hour", "-d", help="Estimated hourly cap."),
+    max_spend: float | None = typer.Option(None, "--max-spend", "-s", help="Spend guard for this run."),
+    network_volume_id: str | None = typer.Option(None, "--network-volume-id", "-V", help="Existing RunPod network volume id."),
+    auto_network_volume: bool | None = typer.Option(None, "--auto-network-volume/--no-auto-network-volume", "-a/-A"),
+    network_volume_data_center_id: str | None = typer.Option(None, "--network-volume-data-center-id", "-D"),
+    min_vcpu_per_gpu: int | None = typer.Option(None, "--min-vcpu-per-gpu", "-u", help="Minimum host vCPUs per GPU."),
+    min_ram_per_gpu: int | None = typer.Option(None, "--min-ram-per-gpu", "-r", help="Minimum host RAM per GPU, in GB."),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Verify and print the plan without contacting RunPod."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip billable-compute confirmation."),
 ) -> None:
     """Shortcut for `opbdh run now`."""
@@ -473,6 +509,7 @@ def launch(
         network_volume_data_center_id=network_volume_data_center_id,
         min_vcpu_per_gpu=min_vcpu_per_gpu,
         min_ram_per_gpu=min_ram_per_gpu,
+        provider=provider,
     )
     _execute_run(cfg, dry_run=dry_run, yes=yes)
 
@@ -536,13 +573,13 @@ def config_show(
 def config_write(
     output: Path | None = typer.Option(None, "--output", "-o", help="Config path. Defaults to global config."),
     model: str = typer.Option(..., "--model", "-m", help="Hugging Face model id."),
-    code: str = typer.Option("", "--code", help="Default code path. Supports {cwd}, {model_slug}, and env vars."),
-    command: str = typer.Option("", "--command", help="Default remote command."),
-    vram_gb: int = typer.Option(24, "--vram-gb"),
-    max_dollars_per_hour: float | None = typer.Option(None, "--max-dollars-per-hour"),
-    max_spend: float = typer.Option(5.0, "--max-spend"),
-    auto_network_volume: bool = typer.Option(False, "--auto-network-volume/--no-auto-network-volume"),
-    network_volume_data_center_id: str = typer.Option("", "--network-volume-data-center-id"),
+    code: str = typer.Option("", "--code", "-f", help="Default code path. Supports {cwd}, {model_slug}, and env vars."),
+    command: str = typer.Option("", "--command", "-x", help="Default remote command."),
+    vram_gb: int = typer.Option(24, "--vram-gb", "-v"),
+    max_dollars_per_hour: float | None = typer.Option(None, "--max-dollars-per-hour", "-d"),
+    max_spend: float = typer.Option(5.0, "--max-spend", "-s"),
+    auto_network_volume: bool = typer.Option(False, "--auto-network-volume/--no-auto-network-volume", "-a/-A"),
+    network_volume_data_center_id: str = typer.Option("", "--network-volume-data-center-id", "-D"),
 ) -> None:
     cfg = OpbdhConfig(
         model_id=model,
@@ -560,7 +597,7 @@ def config_write(
 
 @config_app.command("wizard")
 def config_wizard(
-    scope: str = typer.Option("global", "--scope", help="global or local"),
+    scope: str = typer.Option("global", "--scope", "-s", help="global or local"),
     output: Path | None = typer.Option(None, "--output", "-o"),
 ) -> None:
     try:
@@ -633,6 +670,72 @@ def models_search(query: str, limit: int = typer.Option(10, "--limit", "-n")) ->
     console.print(table)
 
 
+@models_app.command("estimate")
+def models_estimate(
+    model: str = typer.Argument(..., help="Hugging Face model id."),
+    goal: str = typer.Option("inference", "--goal", "-g", help=f"One of: {', '.join(GOALS)}."),
+    context: int | None = typer.Option(None, "--context", "-C", help="Context length. Defaults per goal."),
+    batch: int = typer.Option(1, "--batch", "-b", help="Batch size (concurrent sequences)."),
+    cloud_type: str = typer.Option("COMMUNITY", "--cloud-type", "-t", help="COMMUNITY or SECURE, for $/hr estimates."),
+    json_out: bool = typer.Option(False, "--json", "-j", help="Emit machine-readable JSON instead of tables."),
+) -> None:
+    """Estimate VRAM, host RAM, and disk needed to run MODEL for a given goal."""
+    try:
+        estimate = estimate_for_model(model, goal, context_len=context, batch_size=batch)
+    except (RuntimeError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    gpu_splits = []
+    for num_gpus in (1, 2, 4, 8):
+        needed = estimate.min_vram_gb(num_gpus)
+        fits = candidate_gpus(needed, None, cloud_type)
+        cheapest = min(fits, key=lambda gpu: gpu.hourly(cloud_type)) if fits else None
+        gpu_splits.append(
+            {
+                "num_gpus": num_gpus,
+                "min_vram_per_gpu_gb": needed,
+                "cheapest_gpu": cheapest.id if cheapest else None,
+                "estimated_dollars_per_hour": round(cheapest.hourly(cloud_type) * num_gpus, 2) if cheapest else None,
+            }
+        )
+
+    if json_out:
+        console.print_json(json.dumps({**asdict(estimate), "notes": list(estimate.notes), "gpu_splits": gpu_splits}))
+        return
+
+    table = Table(title=f"{model} — {estimate.goal} (context {estimate.context_len}, batch {estimate.batch_size})")
+    table.add_column("Component", style="cyan")
+    table.add_column("Estimate", justify="right")
+    table.add_row("Parameters", f"{estimate.param_count / 1e9:.2f}B")
+    table.add_row("Weights", f"{estimate.weights_gb:.1f} GB")
+    if estimate.kv_cache_gb:
+        table.add_row("KV cache", f"{estimate.kv_cache_gb:.1f} GB")
+    if estimate.activations_gb:
+        table.add_row("Activations", f"{estimate.activations_gb:.1f} GB")
+    if estimate.optimizer_gb:
+        table.add_row("Grads + optimizer", f"{estimate.optimizer_gb:.1f} GB")
+    table.add_row("[bold]Total VRAM[/]", f"[bold]{estimate.total_vram_gb:.1f} GB[/]")
+    table.add_row("Host RAM", f"{estimate.host_ram_gb} GB")
+    table.add_row("Disk / volume", f"{estimate.disk_gb} GB")
+    console.print(table)
+
+    fit_table = Table(title=f"GPU fit ({cloud_type.lower()} $/hr estimates)")
+    fit_table.add_column("GPUs", justify="right")
+    fit_table.add_column("VRAM/GPU needed", justify="right")
+    fit_table.add_column("Cheapest fit")
+    fit_table.add_column("$/hr total", justify="right")
+    for split in gpu_splits:
+        fit_table.add_row(
+            str(split["num_gpus"]),
+            f"{split['min_vram_per_gpu_gb']} GB",
+            split["cheapest_gpu"] or "[red]none in catalog[/]",
+            f"{split['estimated_dollars_per_hour']:.2f}" if split["estimated_dollars_per_hour"] else "-",
+        )
+    console.print(fit_table)
+    for note in estimate.notes:
+        console.print(f"[dim]note: {note}[/]")
+
+
 @models_app.command("size")
 def models_size(model: str) -> None:
     estimate = estimate_model_size_gb(model)
@@ -646,10 +749,38 @@ def models_size(model: str) -> None:
 
 @app.command("gpus")
 def gpus(
-    vram_gb: int = typer.Option(24, "--vram-gb"),
-    max_dollars_per_hour: float | None = typer.Option(None, "--max-dollars-per-hour"),
-    cloud_type: str = typer.Option("SECURE", "--cloud-type"),
+    vram_gb: int = typer.Option(24, "--vram-gb", "-v"),
+    max_dollars_per_hour: float | None = typer.Option(None, "--max-dollars-per-hour", "-d"),
+    cloud_type: str = typer.Option("SECURE", "--cloud-type", "-t"),
+    provider: str = typer.Option("runpod", "--provider", "-p", help="Compute provider: runpod or primeintellect."),
 ) -> None:
+    if provider.strip().lower() == "primeintellect":
+        from .primeintellect import find_pi_offers, offer_hourly
+
+        offers = find_pi_offers(
+            min_vram_gb=vram_gb,
+            max_dollars_per_hour=max_dollars_per_hour,
+            cloud_type=cloud_type,
+        )
+        table = Table(title="Prime Intellect GPU offers (live)")
+        table.add_column("GPU type")
+        table.add_column("Provider")
+        table.add_column("Region")
+        table.add_column("VRAM", justify="right")
+        table.add_column("$/hr", justify="right")
+        table.add_column("Stock")
+        for offer in offers:
+            hourly = offer_hourly(offer)
+            table.add_row(
+                str(offer.get("gpuType", "?")),
+                str(offer.get("provider", "?")),
+                str(offer.get("dataCenter") or offer.get("region") or "?"),
+                str(offer.get("gpuMemory", "?")),
+                f"{hourly:.2f}" if hourly is not None else "?",
+                str(offer.get("stockStatus", "?")),
+            )
+        console.print(table)
+        return
     table = Table(title="OPBDH GPU candidates")
     table.add_column("RunPod GPU id")
     table.add_column("VRAM", justify="right")

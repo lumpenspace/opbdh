@@ -21,11 +21,15 @@ class _SafeFormatDict(dict[str, str]):
         return "{" + key + "}"
 
 
+SUPPORTED_PROVIDERS = ("runpod", "primeintellect")
+
+
 @dataclass(slots=True)
 class OpbdhConfig:
     model_id: str = ""
     code: str = ""
     command: str = ""
+    provider: str = "runpod"
     image: str = DEFAULT_RUNPOD_IMAGE
     cloud_type: str = "SECURE"
     vram_gb: int = 24
@@ -49,6 +53,15 @@ class OpbdhConfig:
     # opbdh keypair under the config dir when none exists.
     ssh_key: str = ""
     ssh_public_key: str = ""
+
+
+def normalized_provider(config: OpbdhConfig) -> str:
+    provider = config.provider.strip().lower() or "runpod"
+    if provider not in SUPPORTED_PROVIDERS:
+        raise ValueError(
+            f"unsupported provider {config.provider!r}; expected one of: {', '.join(SUPPORTED_PROVIDERS)}"
+        )
+    return provider
 
 
 def config_dir() -> Path:

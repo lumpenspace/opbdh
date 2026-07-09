@@ -29,10 +29,20 @@ from .remote import (
     wait_for_ssh,
 )
 
-from .config import OpbdhConfig, config_dir, model_slug
+from .config import OpbdhConfig, config_dir, model_slug, normalized_provider
 from .gpu import candidate_gpus, estimated_hourly
 from .hal import HalEye
 from .hf import estimate_model_size_gb, suggested_network_volume_gb
+from .primeintellect import (
+    create_pi_pod,
+    delete_pi_pod,
+    ensure_pi_ssh_key,
+    extract_pi_ssh_target,
+    find_pi_offers,
+    offer_hourly,
+    offer_label,
+    wait_for_pi_pod,
+)
 from .verify import default_command_for_code, verify_code
 
 
@@ -217,29 +227,47 @@ def make_plan(config: OpbdhConfig, *, code_path: Path, run_id: str | None = None
     if not verification.ok:
         raise ValueError("Static verification failed:\n" + "\n".join(verification.errors))
     command = config.command.strip() or default_command_for_code(code_path)
-    candidates = candidate_gpus(config.vram_gb, config.max_dollars_per_hour, config.cloud_type)
-    if not candidates:
-        raise ValueError(
-            f"No configured RunPod GPU estimate satisfies {config.vram_gb} GB VRAM"
-            f" under {config.max_dollars_per_hour}/hr."
+    provider = normalized_provider(config)
+    if provider == "primeintellect":
+        offers = find_pi_offers(
+            min_vram_gb=config.vram_gb,
+            max_dollars_per_hour=config.max_dollars_per_hour,
+            cloud_type=config.cloud_type,
         )
-    network_volume_id = config.network_volume_id.strip()
-    network_volume_size_gb = config.network_volume_size_gb
-    model_estimate = estimate_model_size_gb(config.model_id) if config.model_id and config.auto_network_volume and not network_volume_size_gb else None
-    if not network_volume_id and config.auto_network_volume:
+        if not offers:
+            raise ValueError(
+                f"No Prime Intellect offer satisfies {config.vram_gb} GB VRAM"
+                f" under {config.max_dollars_per_hour}/hr."
+            )
+        gpu_candidate_ids = [offer_label(offer) for offer in offers[:8]]
+        estimated_hourly_dollars = offer_hourly(offers[0])
+    else:
+        candidates = candidate_gpus(config.vram_gb, config.max_dollars_per_hour, config.cloud_type)
+        if not candidates:
+            raise ValueError(
+                f"No configured RunPod GPU estimate satisfies {config.vram_gb} GB VRAM"
+                f" under {config.max_dollars_per_hour}/hr."
+            )
+        gpu_candidate_ids = [gpu.id for gpu in candidates]
+        estimated_hourly_dollars = candidates[0].hourly(config.cloud_type)
+    # Network volumes are a RunPod concept; other providers run from pod-local disk.
+    volumes_supported = provider == "runpod"
+    network_volume_id = config.network_volume_id.strip() if volumes_supported else ""
+    network_volume_size_gb = config.network_volume_size_gb if volumes_supported else None
+    model_estimate = estimate_model_size_gb(config.model_id) if config.model_id and volumes_supported and config.auto_network_volume and not network_volume_size_gb else None
+    if volumes_supported and not network_volume_id and config.auto_network_volume:
         network_volume_size_gb = network_volume_size_gb or suggested_network_volume_gb(
             model_estimate,
             fallback_gb=config.pod_volume_gb,
         )
-    first = candidates[0]
     results_dir = Path(config.results_dir).expanduser().resolve() / run_id
     return OpbdhPlan(
         run_id=run_id,
         config=config,
         code_path=code_path,
         command=command,
-        gpu_type_ids=[gpu.id for gpu in candidates],
-        estimated_hourly_dollars=first.hourly(config.cloud_type),
+        gpu_type_ids=gpu_candidate_ids,
+        estimated_hourly_dollars=estimated_hourly_dollars,
         model_size_gb=model_estimate.size_gb if model_estimate else None,
         network_volume_id=network_volume_id,
         network_volume_size_gb=network_volume_size_gb,
@@ -449,8 +477,9 @@ def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None
     _append_local_log(local_log, f"Code: {plan.code_path}")
     _append_local_log(local_log, f"Command: {plan.command}")
     _append_local_log(local_log, f"GPU candidates: {', '.join(plan.gpu_type_ids)}")
+    provider = normalized_provider(plan.config)
     if dry_run:
-        _append_local_log(local_log, "Dry run requested; not contacting RunPod.")
+        _append_local_log(local_log, f"Dry run requested; not contacting {provider}.")
         return None
 
     private_key, public_key = resolve_ssh_key_paths(plan.config)
@@ -462,7 +491,8 @@ def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None
     delete_pod = True
     try:
         with HalEye("preparing the mission") as eye:
-            network_volume_id = ensure_network_volume(plan)
+            if provider == "runpod":
+                network_volume_id = ensure_network_volume(plan)
             bundle = build_bundle(
                 plan.config,
                 code_path=plan.code_path,
@@ -470,40 +500,65 @@ def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None
                 run_id=plan.run_id,
                 network_volume_id=network_volume_id,
             )
-            _append_local_log(local_log, "Requesting RunPod pod.")
+            _append_local_log(local_log, f"Requesting {provider} pod.")
             eye.update("requesting a pod")
-            # Respect OPBDH_RUNPOD_GPU_TYPES env var to pin specific GPU (e.g. avoid broken machines)
-            import os as _os
-            _gpu_override = _os.environ.get("OPBDH_RUNPOD_GPU_TYPES", "").strip()
-            if _gpu_override:
-                _override_list = [g.strip() for g in _gpu_override.split(",") if g.strip()]
-                _filtered = [g for g in plan.gpu_type_ids if g in _override_list]
-                _effective_gpu_types = _filtered if _filtered else plan.gpu_type_ids
+            if provider == "primeintellect":
+                ssh_key_id = ensure_pi_ssh_key(public_key_text)
+                offers = find_pi_offers(
+                    min_vram_gb=plan.config.vram_gb,
+                    max_dollars_per_hour=plan.config.max_dollars_per_hour,
+                    cloud_type=plan.config.cloud_type,
+                )
+                if not offers:
+                    raise RuntimeError(
+                        f"No Prime Intellect offer currently satisfies {plan.config.vram_gb} GB VRAM"
+                        f" under {plan.config.max_dollars_per_hour}/hr."
+                    )
+                pod_id, selected_gpu_type, hourly = create_pi_pod(
+                    name=f"opbdh-{plan.run_id}",
+                    offers=offers,
+                    ssh_key_id=ssh_key_id,
+                    image=plan.config.image,
+                    disk_gb=plan.config.container_disk_gb,
+                    max_dollars_per_hour=plan.config.max_dollars_per_hour,
+                )
             else:
-                _effective_gpu_types = plan.gpu_type_ids
-            pod_id, ssh_label, selected_gpu_type = create_runpod_pod(
-                name=f"opbdh-{plan.run_id}",
-                cloud_type=plan.config.cloud_type,
-                public_key=public_key_text,
-                gpu_types=_effective_gpu_types,
-                image=plan.config.image,
-                volume_gb=plan.config.pod_volume_gb,
-                container_disk_gb=plan.config.container_disk_gb,
-                min_vcpu_per_gpu=plan.config.min_vcpu_per_gpu,
-                min_ram_per_gpu_gb=plan.config.min_ram_per_gpu_gb,
-                network_volume_id=network_volume_id,
-                search_from=plan.code_path.parent,
-            )
-            _append_local_log(local_log, f"Pod {pod_id} requested on {selected_gpu_type}; SSH hint: {ssh_label}.")
+                # Respect OPBDH_RUNPOD_GPU_TYPES env var to pin specific GPU (e.g. avoid broken machines)
+                import os as _os
+                _gpu_override = _os.environ.get("OPBDH_RUNPOD_GPU_TYPES", "").strip()
+                if _gpu_override:
+                    _override_list = [g.strip() for g in _gpu_override.split(",") if g.strip()]
+                    _filtered = [g for g in plan.gpu_type_ids if g in _override_list]
+                    _effective_gpu_types = _filtered if _filtered else plan.gpu_type_ids
+                else:
+                    _effective_gpu_types = plan.gpu_type_ids
+                pod_id, ssh_label, selected_gpu_type = create_runpod_pod(
+                    name=f"opbdh-{plan.run_id}",
+                    cloud_type=plan.config.cloud_type,
+                    public_key=public_key_text,
+                    gpu_types=_effective_gpu_types,
+                    image=plan.config.image,
+                    volume_gb=plan.config.pod_volume_gb,
+                    container_disk_gb=plan.config.container_disk_gb,
+                    min_vcpu_per_gpu=plan.config.min_vcpu_per_gpu,
+                    min_ram_per_gpu_gb=plan.config.min_ram_per_gpu_gb,
+                    network_volume_id=network_volume_id,
+                    search_from=plan.code_path.parent,
+                )
+                hourly = estimated_hourly(selected_gpu_type, plan.config.cloud_type) or plan.estimated_hourly_dollars or 0.0
+            _append_local_log(local_log, f"Pod {pod_id} requested on {selected_gpu_type}.")
             # Billing starts when the pod is created, not when the job starts.
             start = time.time()
-            hourly = estimated_hourly(selected_gpu_type, plan.config.cloud_type) or plan.estimated_hourly_dollars or 0.0
             eye.set_billing(started_at=start, hourly_dollars=hourly)
             eye.update(f"waiting for pod {pod_id} to boot")
-            pod = wait_for_runpod_pod(pod_id, search_from=plan.code_path.parent)
-            ssh_target = extract_runpod_ssh_target(pod)
+            if provider == "primeintellect":
+                pod = wait_for_pi_pod(pod_id)
+                ssh_target = extract_pi_ssh_target(pod)
+            else:
+                pod = wait_for_runpod_pod(pod_id, search_from=plan.code_path.parent)
+                ssh_target = extract_runpod_ssh_target(pod)
             if ssh_target is None:
-                raise RuntimeError(f"RunPod pod {pod_id} is running but public SSH mapping was not returned")
+                raise RuntimeError(f"pod {pod_id} is running but no public SSH endpoint was returned")
             _append_local_log(local_log, f"Waiting for SSH at root@{ssh_target.host}:{ssh_target.port}.")
             eye.update(f"waiting for SSH at {ssh_target.host}:{ssh_target.port}")
             wait_for_ssh(ssh_target, private_key)
@@ -577,7 +632,7 @@ def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None
                     pass
 
             keep = _timed_yes_no(
-                f"\nRun failed. Keep RunPod pod {pod_id} running for debugging?",
+                f"\nRun failed. Keep {provider} pod {pod_id} running for debugging?",
                 timeout_seconds=max(1, int(plan.config.failure_keepalive_seconds)),
                 default=False,
             )
@@ -588,9 +643,12 @@ def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None
     finally:
         if pod_id and delete_pod:
             try:
-                _append_local_log(local_log, f"Deleting RunPod pod {pod_id}.")
-                delete_runpod_pod(pod_id, search_from=plan.code_path.parent)
-                _append_local_log(local_log, f"RunPod pod {pod_id} deleted.")
+                _append_local_log(local_log, f"Deleting {provider} pod {pod_id}.")
+                if provider == "primeintellect":
+                    delete_pi_pod(pod_id)
+                else:
+                    delete_runpod_pod(pod_id, search_from=plan.code_path.parent)
+                _append_local_log(local_log, f"{provider} pod {pod_id} deleted.")
             except Exception as exc:
                 _append_local_log(local_log, f"Pod deletion failed: {exc}")
 

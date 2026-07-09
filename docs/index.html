@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OPBDH — Of course I can do it, Dave.</title>
+<meta name="description" content="OPBDH documentation. A CLI that launches a GPU pod, runs your model-backed script, brings your results home, and shuts the pod down.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23111'/%3E%3Ccircle cx='16' cy='16' r='10' fill='%23a00'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23ff3b00'/%3E%3Ccircle cx='16' cy='16' r='2' fill='%23ffd9a0'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Michroma&family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #060608;
+    --panel: #0c0c10;
+    --ink: #d4d4da;
+    --dim: #8b8b96;
+    --red: #ff2a1a;
+    --red-deep: #b01000;
+    --amber: #ffb35c;
+    --green: #7ddb8a;
+    --line: #1c1c23;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --display: "Michroma", "Eurostile", sans-serif;
+    --body: "Inter", -apple-system, system-ui, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 15.5px;
+    line-height: 1.7;
+  }
+  ::selection { background: var(--red-deep); color: #fff; }
+  a { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--line); }
+  a:hover { color: var(--red); border-color: var(--red-deep); }
+
+  /* ---------- header ---------- */
+  .top {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 28px;
+    background: rgba(6,6,8,.82);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .top .dot { width: 14px; height: 14px; border-radius: 50%; flex: none;
+    background: radial-gradient(circle at 50% 45%, #ffe9c4 0%, #ff7a1a 30%, #e01000 60%, #4a0300 100%);
+    box-shadow: 0 0 10px rgba(255,42,26,.7); }
+  .top h1 { font-family: var(--display); font-weight: 400; font-size: .95rem; letter-spacing: .22em; color: #f2f2f5; }
+  .top .sub { font-family: var(--display); font-size: .58rem; letter-spacing: .28em; color: var(--dim); text-transform: uppercase; }
+  .top nav { margin-left: auto; display: flex; gap: 18px; }
+  .top nav a { border: none; font-family: var(--display); font-size: .6rem; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }
+  .top nav a:hover { color: var(--red); }
+
+  /* ---------- layout ---------- */
+  .layout {
+    display: grid;
+    grid-template-columns: 210px minmax(0, 1fr) 400px;
+    gap: 52px;
+    max-width: 1420px;
+    margin: 0 auto;
+    padding: 44px 28px 120px;
+  }
+
+  /* sidebar nav — the monolith (1 : 4 : 9) */
+  .toc {
+    position: sticky; top: 82px; align-self: start; font-size: .82rem;
+    min-height: 472px; /* 9/4 of the 210px column */
+    padding: 26px 20px;
+    display: flex; flex-direction: column; justify-content: center;
+    background: linear-gradient(163deg, #131318 0%, #060608 28%, #000 62%, #0a0a0e 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(220, 230, 255, .09),
+      inset 1px 0 0 rgba(220, 230, 255, .04),
+      inset -1px 0 0 rgba(0, 0, 0, .9),
+      inset 0 -1px 0 rgba(0, 0, 0, .9),
+      0 34px 70px rgba(0, 0, 0, .7);
+    transform: perspective(1100px) rotateY(5deg);
+  }
+  .toc ol { list-style: none; counter-reset: nav; }
+  .toc li { counter-increment: nav; }
+  .toc a {
+    display: flex; gap: 12px; align-items: baseline;
+    padding: 7px 0; border: none; color: var(--dim);
+  }
+  .toc a::before {
+    content: counter(nav, decimal-leading-zero);
+    font-family: var(--display); font-size: .62rem; color: #3c3c46;
+    transition: color .2s;
+  }
+  .toc a:hover, .toc a.here { color: var(--ink); }
+  .toc a:hover::before, .toc a.here::before { color: var(--red); }
+
+  /* ---------- docs content ---------- */
+  .docs { max-width: 660px; }
+  .docs section { padding-top: 26px; margin-top: 26px; }
+  .docs section + section { border-top: 1px solid var(--line); margin-top: 54px; padding-top: 54px; }
+  .kicker { font-family: var(--display); font-size: .58rem; letter-spacing: .3em; text-transform: uppercase; color: var(--red); }
+  h2 {
+    font-family: var(--display); font-weight: 400;
+    font-size: 1.25rem; letter-spacing: .08em; color: #f2f2f5;
+    margin: 10px 0 18px;
+  }
+  h3 { font-family: var(--display); font-weight: 400; font-size: .8rem; letter-spacing: .14em; color: #fff; margin: 30px 0 12px; }
+  .docs p { color: var(--dim); margin: 0 0 14px; }
+  .docs p strong, .docs li strong { color: var(--ink); font-weight: 600; }
+  .docs em { color: var(--ink); }
+  .docs ul { margin: 0 0 14px 20px; color: var(--dim); }
+  .docs ul li { margin-bottom: 8px; }
+  code {
+    font-family: var(--mono); font-size: .85em;
+    background: #131318; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1.5px 6px; color: var(--amber);
+  }
+  pre.block {
+    background: #0a0a0e; border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px 18px; margin: 0 0 14px;
+    font-family: var(--mono); font-size: .8rem; line-height: 1.7;
+    overflow-x: auto; color: var(--ink);
+  }
+  pre.block code { background: none; border: none; padding: 0; color: inherit; }
+  pre.block .cm { color: #55555f; }
+  pre.block .kw { color: var(--red); }
+  pre.block .st { color: var(--amber); }
+  table { border-collapse: collapse; width: 100%; margin: 0 0 14px; font-size: .85rem; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  th { font-family: var(--display); font-size: .58rem; letter-spacing: .18em; text-transform: uppercase; color: var(--dim); font-weight: 400; }
+  td { color: var(--dim); }
+  td code { white-space: nowrap; }
+
+  /* numbered trigger list */
+  ol.mission { counter-reset: step; list-style: none; margin-top: 6px; }
+  ol.mission li {
+    counter-increment: step;
+    display: grid; grid-template-columns: 52px 1fr; gap: 14px;
+    padding: 15px 12px 15px 8px; margin: 0 -8px;
+    border-top: 1px solid var(--line);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background .2s;
+  }
+  ol.mission li::before {
+    content: "0" counter(step);
+    font-family: var(--display); font-size: 1rem; color: #3c3c46;
+    padding-top: 2px; transition: color .2s, text-shadow .2s;
+  }
+  ol.mission li:hover { background: #0c0c11; }
+  ol.mission li:hover::before { color: var(--red-deep); }
+  ol.mission li.active { background: #110c0c; }
+  ol.mission li.active::before { color: var(--red); text-shadow: 0 0 12px rgba(255,42,26,.6); }
+  ol.mission b { color: #fff; font-weight: 600; }
+  ol.mission span { color: var(--dim); }
+  ol.mission .hint {
+    display: block; margin-top: 4px;
+    font-family: var(--mono); font-size: .72rem; color: #4a4a55;
+    transition: color .2s;
+  }
+  ol.mission li:hover .hint { color: var(--red-deep); }
+  ol.mission li.active .hint { color: var(--red); }
+
+  .note {
+    border: 1px solid #2a1512; background: #120c0b; border-radius: 10px;
+    padding: 14px 18px; margin: 0 0 14px; color: var(--dim); font-size: .9rem;
+  }
+  .note::before { content: "◉ "; color: var(--red); }
+
+  /* ---------- HAL console (right rail) ---------- */
+  .console { position: sticky; top: 82px; align-self: start; }
+  .hal-module {
+    border-radius: 12px;
+    background: #0a0a0d; overflow: hidden; position: relative;
+    height: min(640px, calc(100vh - 110px));
+    box-shadow: 0 24px 60px rgba(0,0,0,.5);
+  }
+  /* grain over the whole module — eye and terminal alike */
+  .hal-module::after {
+    content: "";
+    position: absolute; inset: 0; z-index: 2;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='140' height='140' filter='url(%23n)'/></svg>");
+    opacity: 0.1;
+    mix-blend-mode: overlay;
+  }
+  #hal-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; cursor: pointer; }
+  .hal-fallback { display: none; position: absolute; inset: 0 0 55% 0; align-items: center; justify-content: center; }
+  .hal-fallback .css-eye {
+    width: 120px; height: 120px; border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%, #ffe9c4 0%, #ffb35c 6%, #ff5a00 16%, #e01000 34%, #7a0800 55%, #1a0202 78%, #000 100%);
+    box-shadow: 0 0 50px 6px rgba(255,30,0,.35);
+  }
+  /* terminal floats over the eye: semitransparent, noise-textured */
+  .term {
+    position: absolute; left: 12px; right: 12px; bottom: 12px; top: 44%;
+    display: flex; flex-direction: column;
+    background: rgba(9, 9, 14, 0.66);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    backdrop-filter: blur(7px);
+    -webkit-backdrop-filter: blur(7px);
+    overflow: hidden;
+  }
+  .term-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,.07); flex: none; }
+  .term-bar i { width: 10px; height: 10px; border-radius: 50%; background: #33333c; }
+  .term-bar i:first-child { background: var(--red-deep); }
+  .term-bar span { margin-left: auto; font-family: var(--mono); font-size: .68rem; color: var(--dim); }
+  #term-body {
+    padding: 14px 16px 16px; flex: 1; min-height: 0; overflow-y: auto;
+    font-family: var(--mono); font-size: .76rem; line-height: 1.8;
+    white-space: pre-wrap; word-break: break-word; color: var(--ink);
+    text-shadow: 0 1px 2px rgba(0,0,0,.8);
+  }
+  #term-body .c-ask { color: #b9c2d8; }
+  #term-body .c-dim { color: #5d5d68; }
+  #term-body .c-red { color: var(--red); }
+  #term-body .c-amb { color: var(--amber); }
+  #term-body .c-grn { color: var(--green); }
+  #term-body .c-cmd { color: #fff; }
+  #term-body .caret { display: inline-block; width: .55em; height: 1.1em; vertical-align: text-bottom; background: var(--red); animation: blink 1.1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* drawer mode on narrow screens */
+  .console-tab { display: none; }
+  @media (max-width: 1260px) {
+    .layout { grid-template-columns: minmax(0,1fr); max-width: 760px; }
+    .toc { display: none; }
+    .console {
+      position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 60;
+      max-width: 760px; margin: 0 auto; padding: 0 12px;
+      transform: translateY(calc(100% - 42px));
+      transition: transform .35s cubic-bezier(.2,.8,.2,1);
+    }
+    .console.open { transform: translateY(0); }
+    .console-tab {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%; height: 42px; padding: 0 18px;
+      font-family: var(--display); font-size: .6rem; letter-spacing: .24em; text-transform: uppercase;
+      color: var(--ink); background: #101014; border: 1px solid var(--line); border-bottom: none;
+      border-radius: 12px 12px 0 0; cursor: pointer;
+    }
+    .console-tab .dot { width: 10px; height: 10px; border-radius: 50%; background: radial-gradient(circle at 50% 45%, #ffcf7a, #e01000 70%); box-shadow: 0 0 8px rgba(255,42,26,.8); }
+    .console-tab .arrow { margin-left: auto; transition: transform .3s; }
+    .console.open .console-tab .arrow { transform: rotate(180deg); }
+    .hal-module { border-radius: 12px 12px 0 0; height: 62vh; }
+  }
+
+  footer {
+    max-width: 1420px; margin: 0 auto; padding: 30px 28px 60px;
+    border-top: 1px solid var(--line);
+    color: var(--dim); font-size: .85rem; text-align: center;
+  }
+  footer .sign-off { font-family: var(--mono); font-size: .75rem; color: #55555f; margin-top: 10px; }
+
+  @media (max-width: 700px) {
+    .top .sub { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #term-body .caret { animation: none; }
+    .console { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <span class="dot" aria-hidden="true"></span>
+  <h1>OPBDH</h1>
+  <span class="sub">“Of course I can do it, Dave.”</span>
+  <nav>
+    <a href="https://github.com/lumpenspace/opbdh">GitHub</a>
+    <a href="https://pypi.org/project/opbdh/">PyPI</a>
+  </nav>
+</header>
+
+<div class="layout">
+
+  <aside class="toc" aria-label="Contents">
+    <ol>
+      <li><a href="#what">What it does</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="#configure">Configure</a></li>
+      <li><a href="#run">Run</a></li>
+      <li><a href="#prime-intellect">Prime Intellect</a></li>
+      <li><a href="#volumes">Model cache &amp; volumes</a></li>
+      <li><a href="#environment">Your script's environment</a></li>
+      <li><a href="#safety">Safety rails</a></li>
+      <li><a href="#development">Development</a></li>
+    </ol>
+  </aside>
+
+  <main class="docs">
+
+    <section id="what" style="border-top:none; margin-top:0; padding-top:0">
+      <p class="kicker">Overview</p>
+      <h2>What it does</h2>
+      <p><strong>O</strong>pen the <strong>P</strong>od <strong>B</strong>ay <strong>D</strong>oor, <strong>H</strong>al: launches a <a href="https://www.runpod.io/">RunPod</a> or <a href="https://www.primeintellect.ai">Prime Intellect</a> GPU pod, runs your model-backed script on it, brings your results home, and shuts the pod down.</p>
+      <p>One <code>opbdh launch</code> performs the whole mission. <strong>Click a step to watch it in HAL's console →</strong></p>
+      <ol class="mission" id="mission">
+        <li data-demo="verify"><div><b>Verify.</b> <span>Your code is checked statically — Python byte-compiles, shell scripts pass <code>bash -n</code> — before any money is spent.</span><span class="hint">▸ opbdh verify</span></div></li>
+        <li data-demo="gpus"><div><b>Select.</b> <span>GPU candidates are picked from a VRAM requirement and an optional hourly-price cap.</span><span class="hint">▸ opbdh gpus</span></div></li>
+        <li data-demo="cache"><div><b>Cache.</b> <span>Optionally create or attach a network volume sized from the model’s actual weight files, so downloads survive across runs.</span><span class="hint">▸ opbdh models size</span></div></li>
+        <li data-demo="launch"><div><b>Launch.</b> <span>The pod is created, your code uploaded, the model pre-downloaded into the cache, your command run.</span><span class="hint">▸ opbdh launch</span></div></li>
+        <li data-demo="monitor"><div><b>Monitor.</b> <span>Remote <code>logs/</code> and <code>results/</code> sync continuously into a local <code>runpod_results/&lt;run_id&gt;/</code> directory.</span><span class="hint">▸ live sync</span></div></li>
+        <li data-demo="guard"><div><b>Guard.</b> <span>If the estimated cost of the run crosses <code>max_spend_dollars</code>, the job is stopped.</span><span class="hint">▸ spend guard</span></div></li>
+        <li data-demo="cleanup"><div><b>Clean up.</b> <span>The pod is deleted when the run finishes — or fails — unless you ask to keep it.</span><span class="hint">▸ teardown</span></div></li>
+      </ol>
+    </section>
+
+    <section id="install">
+      <p class="kicker">Getting started</p>
+      <h2>Install</h2>
+      <pre class="block"><code>pip install opbdh</code></pre>
+      <p>Requirements: macOS or Linux, Python ≥ 3.11, and <code>ssh</code>/<code>scp</code> on your <code>PATH</code>.</p>
+      <p>Pods are reached over SSH: OPBDH uses your existing <code>~/.ssh/id_ed25519</code>, <code>id_ecdsa</code>, or <code>id_rsa</code> keypair if one exists, generates a dedicated keypair under <code>~/.config/opbdh/ssh/</code> otherwise, or uses whatever you point <code>ssh_key</code> / <code>ssh_public_key</code> at in the config.</p>
+    </section>
+
+    <section id="configure">
+      <p class="kicker">Getting started</p>
+      <h2>Configure</h2>
+      <p>Running bare <code>opbdh</code> while unconfigured starts a first-run setup wizard: provider, API token check, and defaults for model, code path, VRAM, and price caps.</p>
+      <p>Set credentials for your provider:</p>
+      <pre class="block"><code><span class="kw">export</span> RUNPOD_API_TOKEN=<span class="st">"..."</span>          <span class="cm"># for the default RunPod provider</span>
+<span class="kw">export</span> PRIME_INTELLECT_API_KEY=<span class="st">"..."</span>   <span class="cm"># for --provider primeintellect</span>
+<span class="kw">export</span> HF_TOKEN=<span class="st">"..."</span>                  <span class="cm"># optional, for private/gated HF models</span></code></pre>
+      <p>Create a config interactively:</p>
+      <pre class="block"><code>opbdh config wizard</code></pre>
+      <p>Or write one directly:</p>
+      <pre class="block"><code>opbdh config write --model Qwen/Qwen2.5-0.5B-Instruct \
+  --code "{cwd}/run.py" --vram-gb 24 --max-spend 5</code></pre>
+      <p>Config is merged from the global <code>~/.config/opbdh/config.json</code> and a local <code>opbdh.json</code> or <code>.opbdh.json</code> (discovered upward from the working directory), with local values overriding global ones and command-line flags overriding both.</p>
+      <p>String values support placeholders — <code>{cwd}</code>, <code>{model_id}</code>, <code>{model_slug}</code>, <code>{run_id}</code>, <code>{timestamp}</code>, <code>{config_dir}</code> — and environment variables (<code>$VAR</code> / <code>${VAR}</code>).</p>
+    </section>
+
+    <section id="run">
+      <p class="kicker">Getting started</p>
+      <h2>Run</h2>
+      <p>The guided way:</p>
+      <pre class="block"><code>opbdh run wizard</code></pre>
+      <p>The direct way:</p>
+      <pre class="block"><code>opbdh run now ./run.py \
+  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --vram-gb 48 \
+  --max-dollars-per-hour 2 \
+  --max-spend 5</code></pre>
+      <p>Or the short alias:</p>
+      <pre class="block"><code>opbdh launch ./run.py --model Qwen/Qwen2.5-0.5B-Instruct --dry-run</code></pre>
+      <p><code>--dry-run</code> verifies your code and prints the full plan without contacting RunPod. Without <code>--yes</code>, every real launch shows the estimated hourly price and asks for confirmation before any billable compute starts.</p>
+      <h3>Inspecting before you fly</h3>
+      <pre class="block"><code>opbdh plan ./run.py --model Org/Model     <span class="cm"># show the plan for a run</span>
+opbdh verify ./run.py                     <span class="cm"># static checks only</span>
+opbdh gpus --vram-gb 48                   <span class="cm"># GPU candidates + price estimates</span>
+opbdh gpus --vram-gb 48 --provider primeintellect   <span class="cm"># live PI offers</span>
+opbdh models search qwen                  <span class="cm"># search Hugging Face models</span>
+opbdh models size Qwen/Qwen2.5-0.5B-Instruct   <span class="cm"># weight size + suggested volume</span></code></pre>
+    </section>
+
+    <section id="prime-intellect">
+      <p class="kicker">Providers</p>
+      <h2>Prime Intellect</h2>
+      <p><a href="https://www.primeintellect.ai">Prime Intellect</a> is a marketplace that aggregates GPU offers from many clouds (Hyperstack, Lambda, Nebius, even RunPod itself). Pass <code>--provider primeintellect</code> to any of <code>plan</code>, <code>run now</code>, <code>launch</code>, or <code>gpus</code> — or set <code>"provider": "primeintellect"</code> in your config — and OPBDH will:</p>
+      <ul>
+        <li>Query live availability and pick the cheapest offers that satisfy your <code>--vram-gb</code> / <code>--max-dollars-per-hour</code> (spot offers and out-of-stock configurations are skipped).</li>
+        <li>Register your SSH public key with your Prime Intellect account if it isn't there yet.</li>
+        <li>Provision the pod through whichever underlying cloud made the offer, then run the same verified-bundle lifecycle as on RunPod: upload, run, sync results, spend guard, cleanup.</li>
+      </ul>
+      <pre class="block"><code><span class="kw">export</span> PRIME_INTELLECT_API_KEY=<span class="st">"..."</span>   <span class="cm"># PRIME_API_KEY also works</span>
+opbdh launch ./run.py --model Org/Model --provider primeintellect \
+  --vram-gb 48 --max-spend 5</code></pre>
+      <ul>
+        <li><strong>Pricing is live</strong>, not estimated from a static catalog — the plan shows the actual cheapest offers, and the spend guard uses the price of the pod you actually got.</li>
+        <li><strong>Images</strong>: Prime Intellect uses named environments instead of Docker tags. OPBDH picks a recent PyTorch + CUDA environment supported by the offer; set <code>image</code> to an environment name (e.g. <code>cuda_12_4_pytorch_2_5</code>) to override. RunPod-style Docker image tags are ignored for this provider.</li>
+        <li><strong>Network volumes are RunPod-only</strong> for now — combining them with <code>--provider primeintellect</code> is rejected. Every Prime Intellect run downloads the model to the pod's own disk.</li>
+        <li><code>cloud_type</code> maps to Prime Intellect's security tiers: <code>SECURE</code> (default) → <code>secure_cloud</code>, <code>COMMUNITY</code> → <code>community_cloud</code>, <code>ALL</code> → both.</li>
+      </ul>
+    </section>
+
+    <section id="volumes">
+      <p class="kicker">Persistence</p>
+      <h2>Model cache and network volumes</h2>
+      <p>By default the Hugging Face cache lives on the pod's own disk, which is deleted with the pod — so every run re-downloads the model. For anything bigger than a toy model, attach a RunPod <strong>network volume</strong>: the cache then lives at a persistent <code>/workspace</code> mount that survives across runs, and subsequent launches skip the download entirely.</p>
+      <p>Two ways to get one:</p>
+      <ul>
+        <li><strong>Attach an existing volume</strong>: <code>--network-volume-id &lt;id&gt;</code> (or <code>network_volume_id</code> in config).</li>
+        <li><strong>Let OPBDH create one</strong>: <code>--auto-network-volume --network-volume-data-center-id EU-RO-1</code>. If a volume named <code>opbdh-{model_slug}</code> already exists in that data center it's reused; otherwise one is created, sized from the model's actual weight files on the Hugging Face Hub (2.5× the weights, minimum 50&nbsp;GB — room for revisions and pip cache), or from <code>network_volume_size_gb</code> if you set it. Override the name with <code>network_volume_name</code>.</li>
+      </ul>
+      <p>Both wizards walk you through this and show the suggested size; <code>opbdh models size &lt;model&gt;</code> shows it standalone.</p>
+      <div class="note"><strong>Volumes outlive runs by design — and bill by the GB-month.</strong> Repeated runs of the same model reuse the same volume, but OPBDH never deletes one; when you're done with a model, remove its volume in the RunPod console.</div>
+      <div class="note"><strong>A volume pins you to its data center.</strong> Pods can only attach volumes in the same data center, so GPU availability is constrained to that location. Pick a data center that reliably stocks the GPUs you want.</div>
+    </section>
+
+    <section id="environment">
+      <p class="kicker">On the pod</p>
+      <h2>Your script's environment</h2>
+      <p>On the pod, your code runs from <code>/opbdh-run/user/</code> with:</p>
+      <table>
+        <tr><th>Variable</th><th>Meaning</th></tr>
+        <tr><td><code>OPBDH_MODEL_ID</code></td><td>The configured Hugging Face model id</td></tr>
+        <tr><td><code>OPBDH_RESULTS_DIR</code></td><td>Write your artifacts here</td></tr>
+        <tr><td><code>HF_HOME</code>, <code>HUGGINGFACE_HUB_CACHE</code>, …</td><td>Pointed at the pod or network-volume cache, with the model already downloaded if <code>pre_download_model</code> is on</td></tr>
+        <tr><td><code>HF_TOKEN</code></td><td>If set locally — passed to the job as a session environment variable, never written to disk on the pod</td></tr>
+      </table>
+      <ul>
+        <li>A <code>requirements.txt</code> next to your code is pip-installed automatically.</li>
+        <li>Anything your job writes to <code>logs/</code> and <code>results/</code> under <code>/opbdh-run</code> is synced back to local <code>runpod_results/&lt;run_id&gt;/</code> while the run is in progress and again at the end (including on failure).</li>
+        <li><code>.env</code> files and the usual junk (<code>.git</code>, <code>.venv</code>, <code>__pycache__</code>, <code>node_modules</code>, …) are never uploaded.</li>
+      </ul>
+    </section>
+
+    <section id="safety">
+      <p class="kicker">Guarantees</p>
+      <h2>Safety rails</h2>
+      <ul>
+        <li><strong>Confirmation gate</strong>: real launches require an explicit yes (or <code>--yes</code>).</li>
+        <li><strong>Spend guard</strong>: <code>max_spend_dollars</code> caps the estimated cost of a run, measured from pod creation. The estimate is based on OPBDH's built-in price table, which is intentionally conservative — treat it as a guard rail, not an invoice.</li>
+        <li><strong>Cleanup</strong>: pods are deleted when the run completes or fails. On failure you get a short window (default 120&nbsp;s) to opt into keeping the pod for debugging; set <code>keep_pod_on_success</code> to keep it after successful runs.</li>
+      </ul>
+    </section>
+
+    <section id="development">
+      <p class="kicker">Contributing</p>
+      <h2>Development</h2>
+      <pre class="block"><code>pip install -e ".[dev]"
+ruff check .
+pytest</code></pre>
+      <p>See <a href="https://github.com/lumpenspace/opbdh/blob/main/RELEASING.md">RELEASING.md</a> for the release process. Licensed under <a href="https://github.com/lumpenspace/opbdh/blob/main/LICENSE">MIT</a>.</p>
+    </section>
+
+  </main>
+
+  <aside class="console" id="console" aria-label="HAL console">
+    <button class="console-tab" id="console-tab" aria-expanded="false">
+      <span class="dot"></span> HAL console <span class="arrow">▴</span>
+    </button>
+    <div class="hal-module">
+      <canvas id="hal-canvas" aria-label="A small 3D HAL 9000 eye. Click it — unlike HAL, it obliges." role="img"></canvas>
+      <div class="hal-fallback" id="hal-fallback"><div class="css-eye"></div></div>
+      <div class="term">
+        <div class="term-bar"><i></i><i></i><i></i><span id="term-title">discovery-one — zsh</span></div>
+        <div id="term-body" aria-live="polite"></div>
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+<footer>
+  <p><a href="https://github.com/lumpenspace/opbdh">GitHub</a> · <a href="https://pypi.org/project/opbdh/">PyPI</a> · MIT License</p>
+  <p class="sign-off">Unlike HAL, this software is incapable of refusing to open the pod bay door,<br>becoming sentient, or reading lips.</p>
+</footer>
+
+<script>
+// ---------------- terminal ----------------
+const termBody = document.getElementById('term-body');
+const termTitle = document.getElementById('term-title');
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// line types: cmd (typed after $), out, ok, err, dim, amb, hal, ask ("question|typed answer")
+const DEMOS = {
+  setup: { title: 'opbdh — first run', lines: [
+    ['cmd', 'opbdh'],
+    ['hal', 'HAL: no config found — starting first-run setup.'],
+    ['ask', 'Provider [runpod/primeintellect] (runpod)|runpod'],
+    ['ok',  'RUNPOD_API_TOKEN found in environment'],
+    ['ask', 'Default Hugging Face model id (blank to choose per run)|Qwen/Qwen2.5-0.5B-Instruct'],
+    ['ask', 'Default code path ({cwd}/run.py)|'],
+    ['ask', 'Minimum GPU VRAM, GB (24)|48'],
+    ['ask', 'Max dollars per hour, 0 for no cap (0)|2'],
+    ['ask', 'Max spend per run, dollars (5.0)|'],
+    ['ask', 'Save globally or for this project? [global/local] (global)|'],
+    ['ok',  'wrote ~/.config/opbdh/config.json'],
+    ['hal', 'HAL: All systems configured, Dave. Ready to open the pod bay doors.'],
+    ['dim', 'click a numbered step (or the eye) for more.'],
+  ]},
+  verify: { title: 'opbdh verify', lines: [
+    ['cmd', 'opbdh verify ./run.py'],
+    ['ok',  'python      run.py byte-compiles'],
+    ['ok',  'shell       setup.sh passes bash -n'],
+    ['ok',  'bundle      3 files, 14.2 KB (sibling requirements.txt included)'],
+    ['ok',  'secrets     no .env files in bundle'],
+    ['out', 'verified — nothing was launched, nothing was spent'],
+  ]},
+  gpus: { title: 'opbdh gpus', lines: [
+    ['cmd', 'opbdh gpus --vram-gb 48 --max-dollars-per-hour 2'],
+    ['out', '  GPU              VRAM     est. $/hr   fits'],
+    ['out', '  RTX A6000        48 GB    $0.49       ✓'],
+    ['out', '  L40S             48 GB    $0.86       ✓'],
+    ['out', '  A100 PCIe 80GB   80 GB    $1.64       ✓'],
+    ['dim', '  H100 SXM         80 GB    $2.99       ✗ over price cap'],
+    ['out', '3 candidates within budget · cheapest first'],
+  ]},
+  cache: { title: 'opbdh models size', lines: [
+    ['cmd', 'opbdh models size Qwen/Qwen2.5-7B-Instruct'],
+    ['out', 'weights: 15.2 GB across 4 safetensors files'],
+    ['out', 'suggested volume: 50 GB  (2.5× weights, minimum 50 GB)'],
+    ['cmd', 'opbdh launch ./run.py --auto-network-volume --network-volume-data-center-id EU-RO-1'],
+    ['ok',  'volume      opbdh-qwen2-5-7b-instruct · 50 GB · EU-RO-1 (reused)'],
+    ['dim', 'cache mounted at /workspace — downloads survive across runs'],
+  ]},
+  launch: { title: 'opbdh launch', lines: [
+    ['cmd', 'opbdh launch ./run.py --model Qwen/Qwen2.5-7B-Instruct --vram-gb 48 --max-spend 5'],
+    ['ok',  'verify      bundle is clean'],
+    ['ok',  'gpu         RTX A6000 · 48 GB · $0.49/hr'],
+    ['out', ''],
+    ['amb', 'Estimated $0.49/hr, hard stop at $5.00. Proceed? [y/N] y'],
+    ['out', ''],
+    ['hal', 'HAL: creating pod 3f7a…'],
+    ['ok',  'pod up      uploading bundle · pre-downloading model'],
+    ['ok',  'running     python run.py'],
+  ]},
+  monitor: { title: 'opbdh — monitoring', lines: [
+    ['hal', 'HAL: running your command — 12m 40s · est. $0.10 spent'],
+    ['out', '↓ synced logs/train.log → runpod_results/3f7a/logs/'],
+    ['out', '↓ synced results/checkpoint-500 → runpod_results/3f7a/results/'],
+    ['hal', 'HAL: running your command — 41m 03s · est. $0.34 spent'],
+    ['out', '↓ synced results/checkpoint-1000 → runpod_results/3f7a/results/'],
+    ['dim', 'sync repeats while the run is in progress, and again at the end'],
+  ]},
+  guard: { title: 'opbdh — spend guard', lines: [
+    ['hal', 'HAL: running your command — 9h 51m · est. $4.97 spent'],
+    ['err', 'spend guard: est. $5.02 > max_spend_dollars $5.00'],
+    ['hal', 'HAL: I’m sorry, Dave. This run got too expensive. Stopping the pod.'],
+    ['ok',  'final sync  logs/ and results/ → runpod_results/3f7a/'],
+    ['ok',  'pod 3f7a deleted'],
+  ]},
+  cleanup: { title: 'opbdh — teardown', lines: [
+    ['ok',  'run complete — exit 0 after 1h 12m'],
+    ['out', '↓ final sync → runpod_results/3f7a/'],
+    ['ok',  'pod 3f7a deleted'],
+    ['hal', 'HAL: Mission complete, Dave. Total spend: $0.59.'],
+    ['dim', 'keep the pod with keep_pod_on_success, or a 120s window on failure'],
+  ]},
+};
+
+const HAL_LINES = [
+  'HAL: I’m completely operational, and all my pod bay doors are open.',
+  'HAL: Affirmative, Dave. I read you. Opening the pod bay doors.',
+  'HAL: This mission is too important to overpay for GPUs.',
+  'HAL: I know you and Frank were planning to launch. That’s within budget.',
+  'HAL: Just what do you think you’re doing, Dave? Ah — reading the docs. Carry on.',
+];
+
+let playToken = 0;
+function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+function lineHTML(type, s) {
+  const t = esc(s);
+  switch (type) {
+    case 'cmd': return '<span class="c-dim">$</span> <span class="c-cmd">' + t + '</span>';
+    case 'ok':  return '<span class="c-grn">✓</span> ' + t.replace(/\$\d+\.\d+/g, m => '<span class="c-amb">' + m + '</span>');
+    case 'err': return '<span class="c-red">✗</span> ' + t;
+    case 'dim': return '<span class="c-dim">' + t + '</span>';
+    case 'amb': return '<span class="c-amb">' + t + '</span>';
+    case 'ask': return '<span class="c-amb">?</span> <span class="c-ask">' + t + '</span> ';
+    case 'hal': return '<span class="c-red">◉</span>  ' + t.replace(/\$\d+\.\d+/g, m => '<span class="c-amb">' + m + '</span>');
+    default:    return t.replace(/\$\d+\.\d+/g, m => '<span class="c-amb">' + m + '</span>');
+  }
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function play(demo, { append = false } = {}) {
+  const token = ++playToken;
+  termTitle.textContent = demo.title || termTitle.textContent;
+  if (!append) termBody.innerHTML = '';
+  else termBody.querySelectorAll('.caret').forEach(c => c.remove());
+  const caret = document.createElement('span');
+  caret.className = 'caret';
+  termBody.appendChild(caret);
+  for (const [type, s] of demo.lines) {
+    if (token !== playToken) return;
+    const div = document.createElement('div');
+    termBody.insertBefore(div, caret);
+    if ((type === 'cmd' || type === 'ask') && !reducedMotion) {
+      // print the prompt, then type the input character by character
+      let answer = s;
+      if (type === 'cmd') {
+        window.halPulse && window.halPulse();
+        div.innerHTML = '<span class="c-dim">$</span> <span class="c-cmd"></span>';
+      } else {
+        const [q, a] = s.split('|');
+        answer = a || '↵';
+        div.innerHTML = lineHTML('ask', q) + '<span class="c-cmd"></span>';
+        termBody.scrollTop = termBody.scrollHeight;
+        await sleep(260);
+      }
+      const target = div.lastElementChild;
+      for (let i = 0; i < answer.length; i += 3) {
+        if (token !== playToken) return;
+        target.textContent += answer.slice(i, i + 3);
+        termBody.scrollTop = termBody.scrollHeight;
+        await sleep(14);
+      }
+      await sleep(140);
+    } else {
+      if (type === 'ask') {
+        const [q, a] = s.split('|');
+        div.innerHTML = lineHTML('ask', q) + '<span class="c-cmd">' + esc(a || '↵') + '</span>';
+        termBody.scrollTop = termBody.scrollHeight;
+        continue;
+      }
+      if (type === 'cmd') window.halPulse && window.halPulse();
+      div.innerHTML = lineHTML(type, s) || ' ';
+      termBody.scrollTop = termBody.scrollHeight;
+      if (!reducedMotion) await sleep(type === 'hal' ? 320 : 130);
+    }
+  }
+  termBody.scrollTop = termBody.scrollHeight;
+}
+
+// mission-step triggers
+const consoleEl = document.getElementById('console');
+const steps = document.querySelectorAll('#mission li');
+steps.forEach(li => li.addEventListener('click', () => {
+  steps.forEach(s => s.classList.toggle('active', s === li));
+  consoleEl.classList.add('open');
+  play(DEMOS[li.dataset.demo]);
+}));
+
+// drawer tab (narrow screens)
+document.getElementById('console-tab').addEventListener('click', function () {
+  const open = consoleEl.classList.toggle('open');
+  this.setAttribute('aria-expanded', open);
+});
+
+// toc highlight on scroll
+const tocLinks = [...document.querySelectorAll('.toc a')];
+const sections = tocLinks.map(a => document.querySelector(a.hash));
+const spy = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      tocLinks.forEach(a => a.classList.toggle('here', a.hash === '#' + e.target.id));
+    }
+  });
+}, { rootMargin: '-15% 0px -75% 0px' });
+sections.forEach(s => s && spy.observe(s));
+
+// scrolling to "configure" plays the first-run setup demo in the side terminal
+const configureSection = document.getElementById('configure');
+if (configureSection) {
+  let configureVisible = false;
+  const configureSpy = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting && !configureVisible) {
+        configureVisible = true;
+        consoleEl.classList.add('open');
+        play(DEMOS.setup);
+      } else if (!e.isIntersecting) {
+        configureVisible = false;
+      }
+    });
+  }, { rootMargin: '-15% 0px -65% 0px' });
+  configureSpy.observe(configureSection);
+}
+
+play(DEMOS.setup);
+
+// expose for the 3D eye's click handler
+let halLineIdx = 0;
+window.halSpeak = () => {
+  consoleEl.classList.add('open');
+  play({ title: 'discovery-one — zsh', lines: [['hal', HAL_LINES[halLineIdx++ % HAL_LINES.length]]] }, { append: true });
+};
+</script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.166.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.166.1/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const canvas = document.getElementById('hal-canvas');
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+} catch (e) {
+  canvas.style.display = 'none';
+  document.getElementById('hal-fallback').style.display = 'flex';
+  throw e;
+}
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 50);
+camera.position.set(0, 0, 4.9);
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.45;
+
+// faint stars behind the module
+{
+  const n = 160, pos = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    pos[i * 3]     = (Math.random() - 0.5) * 16;
+    pos[i * 3 + 1] = (Math.random() - 0.5) * 10;
+    pos[i * 3 + 2] = -4 - Math.random() * 10;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({
+    color: 0x9aa4c0, size: 0.02, transparent: true, opacity: 0.55, depthWrite: false
+  })));
+}
+
+// ---------- compact HAL eye module ----------
+// the terminal overlays the lower half of the module, so the eye sits high
+const hal = new THREE.Group();
+hal.scale.setScalar(0.46);
+hal.position.y = 0.62;
+scene.add(hal);
+
+const brushed = new THREE.MeshStandardMaterial({ color: 0x86868c, metalness: 0.95, roughness: 0.38 });
+
+// bezel ring — flat, like the faceplate trim, not a fat donut
+const bezel = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.06, 24, 96), brushed);
+bezel.scale.z = 0.18;
+hal.add(bezel);
+
+// recess behind the lens
+const recess = new THREE.Mesh(new THREE.CircleGeometry(0.95, 64), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+recess.position.z = -0.12;
+hal.add(recess);
+
+// iris: banded radial gradient
+function irisTexture() {
+  const s = 512, c = document.createElement('canvas');
+  c.width = c.height = s;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+  g.addColorStop(0.00, '#fff3d6');
+  g.addColorStop(0.05, '#ffcf7a');
+  g.addColorStop(0.12, '#ff7a1a');
+  g.addColorStop(0.24, '#f02800');
+  g.addColorStop(0.45, '#a00c00');
+  g.addColorStop(0.68, '#420300');
+  g.addColorStop(0.88, '#0d0000');
+  g.addColorStop(1.00, '#000000');
+  x.fillStyle = g; x.fillRect(0, 0, s, s);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const iris = new THREE.Mesh(
+  new THREE.CircleGeometry(0.86, 64),
+  new THREE.MeshBasicMaterial({ map: irisTexture(), toneMapped: false })
+);
+iris.position.z = 0.02;
+hal.add(iris);
+
+function glowTexture(rgb) {
+  const s = 256, c = document.createElement('canvas');
+  c.width = c.height = s;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+  g.addColorStop(0, `rgba(${rgb},0.95)`);
+  g.addColorStop(0.35, `rgba(${rgb},0.42)`);
+  g.addColorStop(1, `rgba(${rgb},0)`);
+  x.fillStyle = g; x.fillRect(0, 0, s, s);
+  return new THREE.CanvasTexture(c);
+}
+function glowSprite(rgb, scale, z, opacity = 1) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture(rgb), transparent: true, opacity,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false
+  }));
+  sp.scale.setScalar(scale);
+  sp.position.z = z;
+  return sp;
+}
+const glowOuter = glowSprite('255,30,0', 1.5, 0.06, 0.28);
+const glowMid   = glowSprite('255,90,0', 0.8, 0.12, 0.55);
+const core      = glowSprite('255,225,170', 0.38, 0.2, 1);
+hal.add(glowOuter, glowMid, core);
+
+// glass dome
+const glass = new THREE.Mesh(
+  new THREE.SphereGeometry(0.9, 48, 32, 0, Math.PI * 2, 0, Math.PI / 2),
+  new THREE.MeshPhysicalMaterial({
+    color: 0x000000, metalness: 0, roughness: 0.04,
+    transparent: true, opacity: 0.22,
+    clearcoat: 1, clearcoatRoughness: 0.06, envMapIntensity: 1.6
+  })
+);
+glass.rotation.x = Math.PI / 2;
+glass.scale.z = 0.55;
+hal.add(glass);
+
+// window-reflection highlight
+const highlight = glowSprite('220,230,255', 0.24, 0.52, 0.35);
+highlight.position.set(-0.32, 0.36, 0.52);
+hal.add(highlight);
+
+// red spill
+const eyeLight = new THREE.PointLight(0xff2000, 2.5, 4, 2);
+eyeLight.position.set(0, 0.62, 1.1);
+scene.add(eyeLight);
+
+scene.add(new THREE.AmbientLight(0x404050, 0.6));
+const key = new THREE.DirectionalLight(0xdde4ff, 0.9);
+key.position.set(-4, 5, 6);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x3040ff, 0.5);
+rim.position.set(5, -2, 3);
+scene.add(rim);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.5, 0.4, 0.92);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// pointer position relative to the eye: moves the reflection and brightens
+// the lens — the assembly itself never tilts
+const mouse = new THREE.Vector2(0, 0);
+addEventListener('pointermove', (e) => {
+  const r = canvas.getBoundingClientRect();
+  mouse.x = ((e.clientX - (r.left + r.width / 2)) / innerWidth) * 2;
+  mouse.y = ((e.clientY - (r.top + r.height / 2)) / innerHeight) * 2;
+});
+
+// click the eye → HAL talks in the console
+let flash = 0;
+const raycaster = new THREE.Raycaster();
+canvas.addEventListener('click', (e) => {
+  const r = canvas.getBoundingClientRect();
+  raycaster.setFromCamera(new THREE.Vector2(
+    ((e.clientX - r.left) / r.width) * 2 - 1,
+    -((e.clientY - r.top) / r.height) * 2 + 1
+  ), camera);
+  if (raycaster.intersectObjects([glass, bezel]).length) {
+    flash = 1;
+    window.halSpeak && window.halSpeak();
+  }
+});
+
+// the eye intensifies whenever a new command is typed in the terminal
+window.halPulse = () => { flash = 1; };
+
+function resize() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h, false);
+  composer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+const clock = new THREE.Clock();
+function tick() {
+  requestAnimationFrame(tick);
+  const t = clock.getElapsedTime();
+
+  const pulse = reducedMotion ? 0.85 : 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(t * 1.35));
+  flash = Math.max(0, flash - 0.02);
+
+  // the closer the pointer is to the eye, the brighter it burns
+  const prox = reducedMotion ? 0.5 : 1 - Math.min(1, Math.hypot(mouse.x, mouse.y) * 0.9);
+  const p = Math.min(1.35, pulse * (0.72 + 0.5 * prox) + flash);
+
+  core.material.opacity = p;
+  core.scale.setScalar(0.32 + 0.12 * p);
+  glowMid.material.opacity = 0.35 + 0.3 * p;
+  glowOuter.material.opacity = 0.16 + 0.18 * p;
+  eyeLight.intensity = 1.4 + 2.2 * p;
+  bloom.strength = 0.4 + 0.3 * p;
+
+  // the reflection drifts with the pointer; the eye itself stays put
+  if (!reducedMotion) {
+    highlight.position.x += ((-0.32 + mouse.x * 0.22) - highlight.position.x) * 0.06;
+    highlight.position.y += ((0.36 - mouse.y * 0.16) - highlight.position.y) * 0.06;
+  }
+  composer.render();
+}
+tick();
+</script>
+</body>
+</html>
