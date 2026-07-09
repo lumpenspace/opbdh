@@ -1,8 +1,11 @@
 # OPBDH
+**O**pen the **P**od **B**ay **D**oor, **H**al 
+
+Full documentation at [opbdh](https://opbdh.hyperplex.org)
 
 ![opbdh](assets/opbd.png)
 
-**O**pen the **P**od **B**ay **D**oor, **H**al — *“Of course I can do it, Dave.”*
+— *“Of course I can do it, Dave.”*
 
 Launches a GPU pod, runs your model-backed script on it, syncs the results home, and deletes the pod.
 
