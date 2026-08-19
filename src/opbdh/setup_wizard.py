@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 
+from . import hx
 from .config import OpbdhConfig, discover_local_config, global_config_path, save_config
 
 _PROVIDER_TOKENS = {
@@ -24,6 +25,7 @@ def _missing_token_vars(provider: str) -> tuple[str, ...]:
 
 
 def run_setup_wizard() -> int:
+    hx.banner("first-run setup")
     try:
         import clypi
         import clypi.parsers as cp

@@ -10,6 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from . import hx
 from .config import OpbdhConfig, global_config_path, load_config, save_config
 from .estimate import GOALS, estimate_for_model
 from .gpu import candidate_gpus
@@ -49,7 +50,7 @@ def _overrides(**kwargs: Any) -> dict[str, Any]:
 
 
 def _print_plan(payload: dict[str, Any]) -> None:
-    table = Table(title="OPBDH plan")
+    table = Table(title="OPBDH plan", title_style="bold #ef4444", border_style="grey37")
     table.add_column("Field", style="cyan")
     table.add_column("Value")
     for key, value in payload.items():
@@ -195,7 +196,7 @@ def _offer_save_config(config: OpbdhConfig) -> None:
         from .config import discover_local_config, save_config
         local_path = discover_local_config()
         if local_path:
-            save = questionary.confirm(f"\nSave these updated requirements back to {local_path.name}?", default=True).ask()
+            save = questionary.confirm(f"\nSave these updated requirements back to {local_path.name}?", default=True, style=hx.questionary_style()).ask()
             if save:
                 save_config(config, local_path)
                 console.print(f"[green]Saved updated config to {local_path}[/]")
@@ -227,7 +228,8 @@ def _prompt_existing_network_volume(opbdh_plan, yes: bool, dry_run: bool) -> Non
                                 "Keep existing volume (reuse data)",
                                 "Create new volume (requires different name)",
                                 "Cancel launch"
-                            ]
+                            ],
+                            style=hx.questionary_style(),
                         ).ask()
                         
                         if choice == "Keep existing volume (reuse data)":
@@ -235,13 +237,14 @@ def _prompt_existing_network_volume(opbdh_plan, yes: bool, dry_run: bool) -> Non
                             break
                         elif choice == "Create new volume (requires different name)":
                             import typer
-                            new_name = questionary.text("Enter new volume name:", instruction="(Ctrl-C or empty to go back)", default=f"{volume_name}-new").ask()
+                            new_name = questionary.text("Enter new volume name:", instruction="(Ctrl-C or empty to go back)", default=f"{volume_name}-new", style=hx.questionary_style()).ask()
                             if not new_name or not new_name.strip():
                                 continue
                             
                             new_size = questionary.text(
                                 f"Enter volume size in GB (default: {opbdh_plan.config.pod_volume_gb}):", 
-                                default=str(opbdh_plan.config.pod_volume_gb)
+                                default=str(opbdh_plan.config.pod_volume_gb),
+                                style=hx.questionary_style(),
                             ).ask()
                             if new_size is None:
                                 continue
@@ -358,20 +361,21 @@ def _execute_run(config: OpbdhConfig, *, dry_run: bool, yes: bool) -> None:
                     
                     choice = questionary.select(
                         "How would you like to proceed?",
-                        choices=choices
+                        choices=choices,
+                        style=hx.questionary_style(),
                     ).ask()
                     
                     if choice == "Try another data center":
                         if valid_dcs:
-                            new_dc = questionary.select("Select a data center:", choices=["< Back"] + valid_dcs + ["Enter manually..."]).ask()
+                            new_dc = questionary.select("Select a data center:", choices=["< Back"] + valid_dcs + ["Enter manually..."], style=hx.questionary_style()).ask()
                             if new_dc == "< Back":
                                 continue
                             if new_dc == "Enter manually...":
-                                new_dc = questionary.text("Enter data center id:", instruction="(or empty to go back)").ask()
+                                new_dc = questionary.text("Enter data center id:", instruction="(or empty to go back)", style=hx.questionary_style()).ask()
                                 if not new_dc or not new_dc.strip():
                                     continue
                         else:
-                            new_dc = questionary.text("Enter data center id:", instruction="(or empty to go back)").ask()
+                            new_dc = questionary.text("Enter data center id:", instruction="(or empty to go back)", style=hx.questionary_style()).ask()
                             if not new_dc or not new_dc.strip():
                                 continue
                                 
@@ -383,7 +387,7 @@ def _execute_run(config: OpbdhConfig, *, dry_run: bool, yes: bool) -> None:
                             opbdh_plan.network_volume_id = ""
                             
                             if old_vol_id and old_dc and old_dc != new_dc.strip():
-                                if questionary.confirm(f"\nDo you want to automatically delete your newly orphaned network volume ({old_vol_id}) in {old_dc}?", default=False).ask():
+                                if questionary.confirm(f"\nDo you want to automatically delete your newly orphaned network volume ({old_vol_id}) in {old_dc}?", default=False, style=hx.questionary_style()).ask():
                                     try:
                                         from .remote import _runpod_rest
                                         _runpod_rest("DELETE", f"/networkvolumes/{old_vol_id}")
@@ -398,7 +402,8 @@ def _execute_run(config: OpbdhConfig, *, dry_run: bool, yes: bool) -> None:
                         new_vram = questionary.text(
                             "Enter new minimum VRAM in GB:",
                             instruction="(Ctrl-C or empty to go back)",
-                            default=str(config.vram_gb)
+                            default=str(config.vram_gb),
+                            style=hx.questionary_style(),
                         ).ask()
                         
                         if not new_vram or not new_vram.strip():
@@ -407,7 +412,8 @@ def _execute_run(config: OpbdhConfig, *, dry_run: bool, yes: bool) -> None:
                         new_price = questionary.text(
                             "Enter new max dollars per hour:",
                             instruction="(leave blank for no max, Ctrl-C to go back)",
-                            default=str(config.max_dollars_per_hour) if config.max_dollars_per_hour is not None else ""
+                            default=str(config.max_dollars_per_hour) if config.max_dollars_per_hour is not None else "",
+                            style=hx.questionary_style(),
                         ).ask()
                         
                         if new_price is None:
@@ -526,6 +532,7 @@ def launch(
 def run_wizard(
     config_file: Path | None = typer.Option(None, "--config", "-c", help="Local OPBDH JSON config."),
 ) -> None:
+    hx.banner("plan a run interactively")
     try:
         import questionary
     except Exception as exc:
@@ -534,23 +541,23 @@ def run_wizard(
     base = load_config(local_config=config_file)
     model = _questionary_model(questionary, default=base.model_id or "Qwen")
     model_estimate = estimate_model_size_gb(model)
-    code = questionary.path("Code file or directory", default=base.code or str(Path.cwd() / "run.py")).ask() or base.code
-    command = questionary.text("Remote command override", default=base.command).ask() or ""
-    vram_gb = int(questionary.text("Minimum VRAM GB", default=str(base.vram_gb)).ask() or str(base.vram_gb))
+    code = questionary.path("Code file or directory", default=base.code or str(Path.cwd() / "run.py"), style=hx.questionary_style()).ask() or base.code
+    command = questionary.text("Remote command override", default=base.command, style=hx.questionary_style()).ask() or ""
+    vram_gb = int(questionary.text("Minimum VRAM GB", default=str(base.vram_gb), style=hx.questionary_style()).ask() or str(base.vram_gb))
     hourly_default = "" if base.max_dollars_per_hour is None else str(base.max_dollars_per_hour)
-    hourly_text = questionary.text("Max dollars/hour estimate (blank for no cap)", default=hourly_default).ask() or ""
-    spend = float(questionary.text("Max spend dollars", default=str(base.max_spend_dollars)).ask() or str(base.max_spend_dollars))
-    network_volume_id = questionary.text("Existing network volume id (blank for none)", default=base.network_volume_id).ask() or ""
+    hourly_text = questionary.text("Max dollars/hour estimate (blank for no cap)", default=hourly_default, style=hx.questionary_style()).ask() or ""
+    spend = float(questionary.text("Max spend dollars", default=str(base.max_spend_dollars), style=hx.questionary_style()).ask() or str(base.max_spend_dollars))
+    network_volume_id = questionary.text("Existing network volume id (blank for none)", default=base.network_volume_id, style=hx.questionary_style()).ask() or ""
     auto_volume = False
     data_center = base.network_volume_data_center_id
     if not network_volume_id:
         suggested_volume = suggested_network_volume_gb(model_estimate, fallback_gb=base.pod_volume_gb)
-        auto_volume = bool(questionary.confirm(f"Create a network volume if needed? Suggested size: {suggested_volume} GB", default=base.auto_network_volume).ask())
+        auto_volume = bool(questionary.confirm(f"Create a network volume if needed? Suggested size: {suggested_volume} GB", default=base.auto_network_volume, style=hx.questionary_style()).ask())
         if auto_volume:
-            data_center = questionary.text("RunPod data center id", default=data_center or "EU-RO-1").ask() or ""
+            data_center = questionary.text("RunPod data center id", default=data_center or "EU-RO-1", style=hx.questionary_style()).ask() or ""
             base.network_volume_size_gb = suggested_volume
-    dry_run = bool(questionary.confirm("Dry run first?", default=True).ask())
-    yes = bool(questionary.confirm("Skip launch confirmation?", default=False).ask()) if not dry_run else True
+    dry_run = bool(questionary.confirm("Dry run first?", default=True, style=hx.questionary_style()).ask())
+    yes = bool(questionary.confirm("Skip launch confirmation?", default=False, style=hx.questionary_style()).ask()) if not dry_run else True
     cfg = load_config(
         local_config=config_file,
         overrides=_overrides(
@@ -608,6 +615,7 @@ def config_wizard(
     scope: str = typer.Option("global", "--scope", "-s", help="global or local"),
     output: Path | None = typer.Option(None, "--output", "-o"),
 ) -> None:
+    hx.banner("configure your pod launcher")
     try:
         import questionary
     except Exception as exc:
@@ -616,15 +624,15 @@ def config_wizard(
     model = _questionary_model(questionary)
     model_estimate = estimate_model_size_gb(model)
     suggested_volume = suggested_network_volume_gb(model_estimate)
-    code = questionary.text("Default local code path", default="{cwd}/run.py").ask() or ""
-    command = questionary.text("Remote command override", default="").ask() or ""
-    vram_gb = int(questionary.text("Minimum VRAM GB", default="24").ask() or "24")
-    hourly_text = questionary.text("Max dollars/hour estimate (blank for no cap)", default="").ask() or ""
-    spend = float(questionary.text("Max spend dollars", default="5").ask() or "5")
-    auto_volume = bool(questionary.confirm("Create a RunPod network volume when none is configured?", default=False).ask())
+    code = questionary.text("Default local code path", default="{cwd}/run.py", style=hx.questionary_style()).ask() or ""
+    command = questionary.text("Remote command override", default="", style=hx.questionary_style()).ask() or ""
+    vram_gb = int(questionary.text("Minimum VRAM GB", default="24", style=hx.questionary_style()).ask() or "24")
+    hourly_text = questionary.text("Max dollars/hour estimate (blank for no cap)", default="", style=hx.questionary_style()).ask() or ""
+    spend = float(questionary.text("Max spend dollars", default="5", style=hx.questionary_style()).ask() or "5")
+    auto_volume = bool(questionary.confirm("Create a RunPod network volume when none is configured?", default=False, style=hx.questionary_style()).ask())
     data_center = ""
     if auto_volume:
-        data_center = questionary.text("RunPod data center id for the volume", default="EU-RO-1").ask() or ""
+        data_center = questionary.text("RunPod data center id for the volume", default="EU-RO-1", style=hx.questionary_style()).ask() or ""
         console.print(f"Suggested volume size for {model}: {suggested_volume} GB")
     cfg = OpbdhConfig(
         model_id=model,
@@ -650,7 +658,7 @@ def config_wizard(
 
 
 def _questionary_model(questionary: Any, *, default: str = "Qwen") -> str:
-    query = questionary.text("Search Hugging Face models", default=default).ask() or ""
+    query = questionary.text("Search Hugging Face models", default=default, style=hx.questionary_style()).ask() or ""
     choices: list[str] = []
     if query.strip():
         try:
@@ -660,17 +668,17 @@ def _questionary_model(questionary: Any, *, default: str = "Qwen") -> str:
         except Exception:
             choices = []
     if choices:
-        selected = questionary.autocomplete("Model", choices=choices, default=choices[0]).ask()
+        selected = questionary.autocomplete("Model", choices=choices, default=choices[0], style=hx.questionary_style()).ask()
         if selected:
             return str(selected)
-    return questionary.text("Model id", default=query).ask() or query
+    return questionary.text("Model id", default=query, style=hx.questionary_style()).ask() or query
 
 
 @models_app.command("search")
 def models_search(query: str, limit: int = typer.Option(10, "--limit", "-n")) -> None:
     from huggingface_hub import HfApi
 
-    table = Table(title=f"Hugging Face models: {query}")
+    table = Table(title=f"Hugging Face models: {query}", title_style="bold #ef4444", border_style="grey37")
     table.add_column("Model")
     table.add_column("Downloads", justify="right")
     for model in HfApi().list_models(search=query, limit=limit):
@@ -711,7 +719,11 @@ def models_estimate(
         console.print_json(json.dumps({**asdict(estimate), "notes": list(estimate.notes), "gpu_splits": gpu_splits}))
         return
 
-    table = Table(title=f"{model} — {estimate.goal} (context {estimate.context_len}, batch {estimate.batch_size})")
+    table = Table(
+        title=f"{model} — {estimate.goal} (context {estimate.context_len}, batch {estimate.batch_size})",
+        title_style="bold #ef4444",
+        border_style="grey37",
+    )
     table.add_column("Component", style="cyan")
     table.add_column("Estimate", justify="right")
     table.add_row("Parameters", f"{estimate.param_count / 1e9:.2f}B")
@@ -727,7 +739,11 @@ def models_estimate(
     table.add_row("Disk / volume", f"{estimate.disk_gb} GB")
     console.print(table)
 
-    fit_table = Table(title=f"GPU fit ({cloud_type.lower()} $/hr estimates)")
+    fit_table = Table(
+        title=f"GPU fit ({cloud_type.lower()} $/hr estimates)",
+        title_style="bold #ef4444",
+        border_style="grey37",
+    )
     fit_table.add_column("GPUs", justify="right")
     fit_table.add_column("VRAM/GPU needed", justify="right")
     fit_table.add_column("Cheapest fit")
@@ -770,7 +786,7 @@ def gpus(
             max_dollars_per_hour=max_dollars_per_hour,
             cloud_type=cloud_type,
         )
-        table = Table(title="Prime Intellect GPU offers (live)")
+        table = Table(title="Prime Intellect GPU offers (live)", title_style="bold #ef4444", border_style="grey37")
         table.add_column("GPU type")
         table.add_column("Provider")
         table.add_column("Region")
@@ -789,7 +805,7 @@ def gpus(
             )
         console.print(table)
         return
-    table = Table(title="OPBDH GPU candidates")
+    table = Table(title="OPBDH GPU candidates", title_style="bold #ef4444", border_style="grey37")
     table.add_column("RunPod GPU id")
     table.add_column("VRAM", justify="right")
     table.add_column("$/hr estimate", justify="right")
