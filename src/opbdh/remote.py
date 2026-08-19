@@ -88,6 +88,7 @@ def create_runpod_pod(
     cloud_type: str,
     public_key: str,
     gpu_types: list[str] | None = None,
+    gpu_count: int | None = None,
     image: str | None = None,
     volume_gb: int | None = None,
     container_disk_gb: int | None = None,
@@ -105,7 +106,7 @@ def create_runpod_pod(
             body: dict[str, Any] = {
                 "cloudType": effective_cloud,
                 "computeType": "GPU",
-                "gpuCount": 1,
+                "gpuCount": max(1, int(gpu_count)) if gpu_count is not None else 1,
                 "gpuTypeIds": [gpu_type],
                 "gpuTypePriority": "availability",
                 "containerDiskInGb": int(container_disk_gb) if container_disk_gb is not None else DEFAULT_RUNPOD_CONTAINER_DISK_GB,

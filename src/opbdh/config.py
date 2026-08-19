@@ -33,6 +33,7 @@ class OpbdhConfig:
     image: str = DEFAULT_RUNPOD_IMAGE
     cloud_type: str = "SECURE"
     vram_gb: int = 24
+    gpu_count: int = 1
     max_dollars_per_hour: float | None = None
     max_spend_dollars: float = 5.0
     container_disk_gb: int = DEFAULT_RUNPOD_CONTAINER_DISK_GB

@@ -242,14 +242,20 @@ def make_plan(config: OpbdhConfig, *, code_path: Path, run_id: str | None = None
         gpu_candidate_ids = [offer_label(offer) for offer in offers[:8]]
         estimated_hourly_dollars = offer_hourly(offers[0])
     else:
-        candidates = candidate_gpus(config.vram_gb, config.max_dollars_per_hour, config.cloud_type)
+        pod_gpu_count = max(1, int(config.gpu_count))
+        per_gpu_cap = (
+            config.max_dollars_per_hour / pod_gpu_count
+            if config.max_dollars_per_hour is not None and config.max_dollars_per_hour > 0
+            else config.max_dollars_per_hour
+        )
+        candidates = candidate_gpus(config.vram_gb, per_gpu_cap, config.cloud_type)
         if not candidates:
             raise ValueError(
                 f"No configured RunPod GPU estimate satisfies {config.vram_gb} GB VRAM"
-                f" under {config.max_dollars_per_hour}/hr."
+                f" x{pod_gpu_count} under {config.max_dollars_per_hour}/hr."
             )
         gpu_candidate_ids = [gpu.id for gpu in candidates]
-        estimated_hourly_dollars = candidates[0].hourly(config.cloud_type)
+        estimated_hourly_dollars = candidates[0].hourly(config.cloud_type) * pod_gpu_count
     # Network volumes are a RunPod concept; other providers run from pod-local disk.
     volumes_supported = provider == "runpod"
     network_volume_id = config.network_volume_id.strip() if volumes_supported else ""
@@ -533,6 +539,7 @@ def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None
                 else:
                     _effective_gpu_types = plan.gpu_type_ids
                 pod_id, ssh_label, selected_gpu_type = create_runpod_pod(
+                    gpu_count=plan.config.gpu_count,
                     name=f"opbdh-{plan.run_id}",
                     cloud_type=plan.config.cloud_type,
                     public_key=public_key_text,
