@@ -53,3 +53,10 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 120
+
+# Pinned explicitly rather than inherited. Ruff's default rule set widened in
+# 0.16, which turned CI red on unchanged code; `ruff>=0.8` in dev deps means
+# any release can move the goalposts. These are the rules ruff applied by
+# default before 0.16, so this freezes the policy the project already had.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

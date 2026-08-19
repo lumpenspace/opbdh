@@ -12,7 +12,8 @@ import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any, Self
 
 from .remote import (
     RUNPOD_CACHE_ROOT,
@@ -114,7 +115,7 @@ class RunEvent:
 class _Reporter:
     """Fans progress out to the HAL eye and/or a caller-supplied callback."""
 
-    def __init__(self, message: str, *, progress: bool, on_event: "Callable[[RunEvent], None] | None") -> None:
+    def __init__(self, message: str, *, progress: bool, on_event: Callable[[RunEvent], None] | None) -> None:
         self._eye = HalEye(message) if progress else None
         self._on_event = on_event
         self.emit("status", message)
@@ -132,7 +133,7 @@ class _Reporter:
         if self._eye is not None:
             self._eye.set_billing(started_at=started_at, hourly_dollars=hourly_dollars)
 
-    def __enter__(self) -> "_Reporter":
+    def __enter__(self) -> Self:
         if self._eye is not None:
             self._eye.__enter__()
         return self
@@ -535,7 +536,7 @@ def run_plan(
     dry_run: bool = False,
     progress: bool = True,
     interactive: bool = True,
-    on_event: "Callable[[RunEvent], None] | None" = None,
+    on_event: Callable[[RunEvent], None] | None = None,
 ) -> OpbdhRunResult | None:
     """Execute a plan: rent a pod, run the code, sync results home, clean up.
 
