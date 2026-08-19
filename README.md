@@ -28,9 +28,29 @@ opbdh launch ./run.py --model Qwen/Qwen2.5-0.5B-Instruct --vram-gb 48 --max-spen
 
 This verifies your code, picks the cheapest fitting GPU, launches the pod, runs your command, streams remote `logs/` and `results/` into `runpod_results/<run_id>/`, stops the run if estimated spend crosses the cap, and deletes the pod when it finishes — or fails. Add `--dry-run` to print the plan without contacting the provider; real launches ask for confirmation unless `--yes`.
 
+## From Python
+
+The same thing, as a library:
+
+```python
+import opbdh
+
+result = opbdh.launch("./run.py", model="Qwen/Qwen2.5-0.5B-Instruct",
+                      vram_gb=48, max_spend=5)
+print(result.outputs_dir)
+```
+
+Keyword arguments are the config fields (plus `model`, `max_spend`, and
+`min_ram_per_gpu` as CLI-style aliases) and layer over `opbdh.json` and the
+global config exactly as flags do. `opbdh.plan(...)` builds the plan without
+renting anything, and `on_event=` streams progress. Unlike the CLI these
+functions never prompt: `launch()` spends without asking, and a failed run
+always cleans up its pod. Full reference in [docs/API.md](docs/API.md).
+
 ## Features
 
 - 🚀 **One command, whole mission** — verify, pick a GPU, launch, run, sync results, clean up
+- 🐍 **CLI or library** — every command is a function call; see [docs/API.md](docs/API.md)
 - 💸 **Cost-aware by default** — hourly price caps, a hard max-spend guard, a confirmation gate
 - 🎯 **GPU selection from a budget** — say how much VRAM and how many dollars
 - 💾 **Persistent model cache** — network volumes sized from the model's real weight files, reused across runs (RunPod)

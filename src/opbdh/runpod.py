@@ -12,7 +12,7 @@ import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .remote import (
     RUNPOD_CACHE_ROOT,
@@ -87,6 +87,59 @@ class OpbdhRunResult:
     results_dir: Path
     returncode: int
     kept_pod: bool = False
+
+    @property
+    def logs_dir(self) -> Path:
+        """Where the remote job's stdout/stderr were synced to."""
+        return self.results_dir / "logs"
+
+    @property
+    def outputs_dir(self) -> Path:
+        """Where the remote job's `results/` were synced to."""
+        return self.results_dir / "results"
+
+
+@dataclass(frozen=True, slots=True)
+class RunEvent:
+    """A progress notification from :func:`run_plan`.
+
+    ``kind`` is one of ``"status"`` (a stage began), ``"output"`` (remote
+    stdout captured after a failure), or ``"error"`` (remote stderr).
+    """
+
+    kind: str
+    message: str
+
+
+class _Reporter:
+    """Fans progress out to the HAL eye and/or a caller-supplied callback."""
+
+    def __init__(self, message: str, *, progress: bool, on_event: "Callable[[RunEvent], None] | None") -> None:
+        self._eye = HalEye(message) if progress else None
+        self._on_event = on_event
+        self.emit("status", message)
+
+    def emit(self, kind: str, message: str) -> None:
+        if self._on_event is not None:
+            self._on_event(RunEvent(kind=kind, message=message))
+
+    def update(self, message: str) -> None:
+        if self._eye is not None:
+            self._eye.update(message)
+        self.emit("status", message)
+
+    def set_billing(self, *, started_at: float, hourly_dollars: float | None) -> None:
+        if self._eye is not None:
+            self._eye.set_billing(started_at=started_at, hourly_dollars=hourly_dollars)
+
+    def __enter__(self) -> "_Reporter":
+        if self._eye is not None:
+            self._eye.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        if self._eye is not None:
+            self._eye.__exit__(exc_type, exc, traceback)
 
 
 def _should_include(relative: Path) -> bool:
@@ -476,7 +529,24 @@ def ensure_network_volume(plan: OpbdhPlan) -> str:
     return str(created["id"])
 
 
-def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None:
+def run_plan(
+    plan: OpbdhPlan,
+    *,
+    dry_run: bool = False,
+    progress: bool = True,
+    interactive: bool = True,
+    on_event: "Callable[[RunEvent], None] | None" = None,
+) -> OpbdhRunResult | None:
+    """Execute a plan: rent a pod, run the code, sync results home, clean up.
+
+    Args:
+        dry_run: log the plan and return None without contacting the provider.
+        progress: draw the HAL status line (a no-op off a TTY anyway).
+        interactive: when a run fails, ask whether to keep the pod alive for
+            debugging. Set False for library/automated use, where the pod is
+            always cleaned up rather than blocking on a prompt.
+        on_event: called with each :class:`RunEvent` as the run progresses.
+    """
     plan.results_dir.mkdir(parents=True, exist_ok=True)
     local_log = plan.results_dir / "opbdh.log"
     _append_local_log(local_log, f"OPBDH run {plan.run_id}")
@@ -496,7 +566,7 @@ def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None
     selected_gpu_type = ""
     delete_pod = True
     try:
-        with HalEye("preparing the mission") as eye:
+        with _Reporter("preparing the mission", progress=progress, on_event=on_event) as eye:
             if provider == "runpod":
                 network_volume_id = ensure_network_volume(plan)
             bundle = build_bundle(
@@ -618,27 +688,36 @@ def run_plan(plan: OpbdhPlan, *, dry_run: bool = False) -> OpbdhRunResult | None
         if pod_id and ssh_target is not None:
             if isinstance(exc, RuntimeError) and "remote job failed with exit code" in str(exc):
                 try:
-                    from rich.console import Console
-                    console = Console()
                     stdout_path = plan.results_dir / "logs" / "stdout.log"
                     if stdout_path.exists():
                         stdout_content = stdout_path.read_text(encoding="utf-8").strip()
                         if stdout_content:
                             lines = stdout_content.splitlines()
+                            label = "Remote Standard Output"
                             if len(lines) > 20:
                                 stdout_content = "(... truncated ...)\n" + "\n".join(lines[-20:])
-                                console.print(f"\n[dim]Remote Standard Output (last 20 lines):[/]\n{stdout_content}")
-                            else:
-                                console.print(f"\n[dim]Remote Standard Output:[/]\n{stdout_content}")
+                                label = "Remote Standard Output (last 20 lines)"
+                            if on_event is not None:
+                                on_event(RunEvent("output", stdout_content))
+                            if progress:
+                                from rich.console import Console
+
+                                Console().print(f"\n[dim]{label}:[/]\n{stdout_content}")
                     stderr_path = plan.results_dir / "logs" / "stderr.log"
                     if stderr_path.exists():
                         stderr_content = stderr_path.read_text(encoding="utf-8").strip()
                         if stderr_content:
-                            console.print(f"\n[red]Remote Standard Error:[/]\n{stderr_content}")
+                            if on_event is not None:
+                                on_event(RunEvent("error", stderr_content))
+                            if progress:
+                                from rich.console import Console
+
+                                Console().print(f"\n[red]Remote Standard Error:[/]\n{stderr_content}")
                 except Exception:
                     pass
 
-            keep = _timed_yes_no(
+            # Library callers get deterministic cleanup instead of a prompt.
+            keep = interactive and _timed_yes_no(
                 f"\nRun failed. Keep {provider} pod {pod_id} running for debugging?",
                 timeout_seconds=max(1, int(plan.config.failure_keepalive_seconds)),
                 default=False,
