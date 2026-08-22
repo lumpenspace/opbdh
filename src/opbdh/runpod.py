@@ -274,6 +274,13 @@ def create_network_volume(*, name: str, data_center_id: str, size_gb: int, searc
     return payload
 
 
+def _per_gpu_hourly_cap(max_dollars_per_hour: float | None, gpu_count: int) -> float | None:
+    """The pod's hourly cap divided across its GPUs (offers are priced per GPU)."""
+    if max_dollars_per_hour is not None and max_dollars_per_hour > 0:
+        return max_dollars_per_hour / max(1, gpu_count)
+    return max_dollars_per_hour
+
+
 def make_plan(config: OpbdhConfig, *, code_path: Path, run_id: str | None = None) -> OpbdhPlan:
     run_id = run_id or time.strftime("%Y%m%d-%H%M%S")
     code_path = code_path.expanduser().resolve()
@@ -282,26 +289,23 @@ def make_plan(config: OpbdhConfig, *, code_path: Path, run_id: str | None = None
         raise ValueError("Static verification failed:\n" + "\n".join(verification.errors))
     command = config.command.strip() or default_command_for_code(code_path)
     provider = normalized_provider(config)
+    pod_gpu_count = max(1, int(config.gpu_count))
+    per_gpu_cap = _per_gpu_hourly_cap(config.max_dollars_per_hour, pod_gpu_count)
     if provider == "primeintellect":
         offers = find_pi_offers(
             min_vram_gb=config.vram_gb,
-            max_dollars_per_hour=config.max_dollars_per_hour,
+            max_dollars_per_hour=per_gpu_cap,
             cloud_type=config.cloud_type,
+            gpu_count=pod_gpu_count,
         )
         if not offers:
             raise ValueError(
                 f"No Prime Intellect offer satisfies {config.vram_gb} GB VRAM"
-                f" under {config.max_dollars_per_hour}/hr."
+                f" x{pod_gpu_count} under {config.max_dollars_per_hour}/hr."
             )
         gpu_candidate_ids = [offer_label(offer) for offer in offers[:8]]
-        estimated_hourly_dollars = offer_hourly(offers[0])
+        estimated_hourly_dollars = (offer_hourly(offers[0]) or 0.0) * pod_gpu_count
     else:
-        pod_gpu_count = max(1, int(config.gpu_count))
-        per_gpu_cap = (
-            config.max_dollars_per_hour / pod_gpu_count
-            if config.max_dollars_per_hour is not None and config.max_dollars_per_hour > 0
-            else config.max_dollars_per_hour
-        )
         candidates = candidate_gpus(config.vram_gb, per_gpu_cap, config.cloud_type)
         if not candidates:
             raise ValueError(
@@ -581,15 +585,19 @@ def run_plan(
             eye.update("requesting a pod")
             if provider == "primeintellect":
                 ssh_key_id = ensure_pi_ssh_key(public_key_text)
+                pod_gpu_count = max(1, int(plan.config.gpu_count))
                 offers = find_pi_offers(
                     min_vram_gb=plan.config.vram_gb,
-                    max_dollars_per_hour=plan.config.max_dollars_per_hour,
+                    max_dollars_per_hour=_per_gpu_hourly_cap(
+                        plan.config.max_dollars_per_hour, pod_gpu_count
+                    ),
                     cloud_type=plan.config.cloud_type,
+                    gpu_count=pod_gpu_count,
                 )
                 if not offers:
                     raise RuntimeError(
                         f"No Prime Intellect offer currently satisfies {plan.config.vram_gb} GB VRAM"
-                        f" under {plan.config.max_dollars_per_hour}/hr."
+                        f" x{pod_gpu_count} under {plan.config.max_dollars_per_hour}/hr."
                     )
                 pod_id, selected_gpu_type, hourly = create_pi_pod(
                     name=f"opbdh-{plan.run_id}",
@@ -598,6 +606,7 @@ def run_plan(
                     image=plan.config.image,
                     disk_gb=plan.config.container_disk_gb,
                     max_dollars_per_hour=plan.config.max_dollars_per_hour,
+                    gpu_count=pod_gpu_count,
                 )
             else:
                 # Respect OPBDH_RUNPOD_GPU_TYPES env var to pin specific GPU (e.g. avoid broken machines)

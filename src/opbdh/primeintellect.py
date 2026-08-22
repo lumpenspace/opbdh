@@ -170,8 +170,14 @@ def create_pi_pod(
     disk_gb: int | None = None,
     max_dollars_per_hour: float | None = None,
     env: dict[str, str] | None = None,
+    gpu_count: int = 1,
 ) -> tuple[str, str, float]:
-    """Try each offer in order; return (pod_id, gpu_label, hourly_dollars)."""
+    """Try each offer in order; return (pod_id, gpu_label, hourly_dollars).
+
+    Pass the same `gpu_count` the offers were queried with (availability
+    is per GPU configuration), so the pod gets every GPU that was priced.
+    """
+    pod_gpu_count = max(1, int(gpu_count))
     last_error: Exception | None = None
     for offer in offers:
         pod: dict[str, Any] = {
@@ -179,7 +185,7 @@ def create_pi_pod(
             "cloudId": offer["cloudId"],
             "gpuType": offer["gpuType"],
             "socket": offer["socket"],
-            "gpuCount": 1,
+            "gpuCount": pod_gpu_count,
             "image": _select_image(offer, image),
             "sshKeyId": ssh_key_id,
         }
@@ -204,7 +210,8 @@ def create_pi_pod(
                 raise RuntimeError(f"unexpected Prime Intellect create response: {data!r}")
             hourly = data.get("priceHr")
             if not isinstance(hourly, (int, float)) or hourly <= 0:
-                hourly = offer_hourly(offer) or 0.0
+                # Availability prices are per GPU; priceHr is the whole pod.
+                hourly = (offer_hourly(offer) or 0.0) * pod_gpu_count
             return str(data["id"]), offer_label(offer), float(hourly)
         except Exception as exc:
             last_error = exc
