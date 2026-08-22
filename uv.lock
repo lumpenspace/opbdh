@@ -517,6 +517,14 @@ wheels = [
 ]
 
 [[package]]
+name = "modelchoice"
+version = "0.1.0"
+source = { editable = "../fash/modelchoice" }
+
+[package.metadata]
+requires-dist = [{ name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" }]
+
+[[package]]
 name = "more-itertools"
 version = "11.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -561,11 +569,12 @@ wheels = [
 
 [[package]]
 name = "opbdh"
-version = "1.1.0"
+version = "1.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "clypi" },
     { name = "huggingface-hub" },
+    { name = "modelchoice" },
     { name = "questionary" },
     { name = "rich" },
     { name = "typer" },
@@ -584,6 +593,7 @@ requires-dist = [
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2" },
     { name = "clypi", specifier = ">=1.9" },
     { name = "huggingface-hub", specifier = ">=1.3,<2" },
+    { name = "modelchoice", editable = "../fash/modelchoice" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "questionary", specifier = ">=2.0" },
     { name = "rich", specifier = ">=13.7" },

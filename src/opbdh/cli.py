@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import hx
+from .api import _huggingface_model_options
 from .config import OpbdhConfig, global_config_path, load_config, save_config
 from .estimate import GOALS, estimate_for_model
 from .gpu import candidate_gpus
@@ -662,9 +663,11 @@ def _questionary_model(questionary: Any, *, default: str = "Qwen") -> str:
     choices: list[str] = []
     if query.strip():
         try:
-            from huggingface_hub import HfApi
-
-            choices = [model.modelId for model in HfApi().list_models(search=query, limit=25) if model.modelId]
+            choices = [
+                option.model
+                for option in _huggingface_model_options(query, limit=25)
+                if option.model
+            ]
         except Exception:
             choices = []
     if choices:
@@ -676,13 +679,11 @@ def _questionary_model(questionary: Any, *, default: str = "Qwen") -> str:
 
 @models_app.command("search")
 def models_search(query: str, limit: int = typer.Option(10, "--limit", "-n")) -> None:
-    from huggingface_hub import HfApi
-
     table = Table(title=f"Hugging Face models: {query}", title_style="bold #ef4444", border_style="grey37")
     table.add_column("Model")
-    table.add_column("Downloads", justify="right")
-    for model in HfApi().list_models(search=query, limit=limit):
-        table.add_row(str(model.modelId), str(getattr(model, "downloads", "") or ""))
+    table.add_column("Details")
+    for option in _huggingface_model_options(query, limit=limit):
+        table.add_row(option.model, option.detail)
     console.print(table)
 
 

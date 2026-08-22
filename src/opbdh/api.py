@@ -24,9 +24,12 @@ confirmation, so treat :func:`launch` as "yes, spend the money".
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
+
+from modelchoice import HuggingFaceSource, ModelCatalog, ModelOption
 
 from .config import OpbdhConfig, load_config
 from .estimate import GOALS, MemoryEstimate, estimate_for_model
@@ -176,14 +179,25 @@ def estimate_memory(
     return estimate_for_model(model_id, goal, context_len=context_len, batch_size=batch_size)
 
 
+def _huggingface_model_options(
+    query: str, *, limit: int = 10, token: str | None = None
+) -> list[ModelOption]:
+    """Shared-catalog rows used by both the Python API and interactive CLI."""
+
+    env = dict(os.environ)
+    if token and token.strip():
+        env["HF_TOKEN"] = token.strip()
+    catalog = ModelCatalog([HuggingFaceSource(env=env)], env=env)
+    return catalog.search_huggingface(query, limit=limit)
+
+
 def search_models(query: str, *, limit: int = 10, token: str | None = None) -> list[str]:
     """Search Hugging Face for model ids matching `query`."""
-    from huggingface_hub import HfApi
 
     return [
-        str(model.modelId)
-        for model in HfApi().list_models(search=query, limit=limit, token=token)
-        if model.modelId
+        option.model
+        for option in _huggingface_model_options(query, limit=limit, token=token)
+        if option.model
     ]
 
 

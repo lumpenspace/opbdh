@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 import pytest
+from modelchoice import ModelOption, ProviderMetadata
 
 import opbdh
 from opbdh.api import configure, gpu_options, launch, plan, summarize, verify
@@ -175,6 +176,37 @@ class TestHelpers:
         from opbdh.hf import ModelSizeEstimate
 
         assert opbdh.suggest_volume_gb(ModelSizeEstimate("m", None, "unavailable")) > 0
+
+    def test_search_models_uses_shared_huggingface_catalog(self, monkeypatch) -> None:
+        captured = {}
+
+        class FakeHuggingFaceSource:
+            def __init__(self, *, env):
+                captured["env"] = env
+
+            @property
+            def metadata(self):
+                return ProviderMetadata("huggingface", "Hugging Face", "hub", True)
+
+            def initial_options(self):
+                return []
+
+            def search(self, query, limit=25, *, force=False):
+                captured["search"] = (query, limit, force)
+                return [
+                    ModelOption(
+                        "huggingface:Org/Model",
+                        "Hugging Face · Org/Model",
+                        "huggingface",
+                        "Org/Model",
+                    )
+                ]
+
+        monkeypatch.setattr("opbdh.api.HuggingFaceSource", FakeHuggingFaceSource)
+
+        assert opbdh.search_models("model", limit=3, token="secret") == ["Org/Model"]
+        assert captured["env"]["HF_TOKEN"] == "secret"
+        assert captured["search"] == ("model", 3, False)
 
 
 class TestPackageSurface:

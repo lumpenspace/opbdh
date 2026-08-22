@@ -71,9 +71,81 @@
     box-shadow: 0 0 10px rgba(255,42,26,.7); }
   .top h1 { font-family: var(--display); font-weight: 400; font-size: .95rem; letter-spacing: .22em; color: #f2f2f5; }
   .top .sub { font-family: var(--display); font-size: .58rem; letter-spacing: .28em; color: var(--dim); text-transform: uppercase; }
-  .top nav { margin-left: auto; display: flex; gap: 18px; }
-  .top nav a { border: none; font-family: var(--display); font-size: .6rem; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }
-  .top nav a:hover { color: var(--red); }
+  .top .resource-nav { margin-left: auto; display: flex; gap: 18px; }
+  .top .resource-nav a { border: none; font-family: var(--display); font-size: .6rem; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }
+  .top .resource-nav a:hover { color: var(--red); }
+  .constellation-nav { display: flex; gap: 5px; }
+  .project-square {
+    --square-bg: #fff;
+    --square-ink: #060608;
+    display: grid; place-items: center;
+    width: 29px; height: 29px; border: 0;
+    background: var(--square-bg); color: var(--square-ink);
+    font-family: var(--mono); font-size: .92rem; line-height: 1;
+    transition: background-color .16s ease, border-color .16s ease, color .16s ease,
+      transform .16s ease, box-shadow .16s ease;
+  }
+  .constellation-nav .project-square {
+    --square-bg: rgba(239, 68, 68, .18);
+    --square-ink: rgba(255, 255, 255, .46);
+    --active-bg: #ef4444;
+    --active-ink: #fff;
+    --active-border: #ff8a80;
+    --active-glow: rgba(239, 68, 68, .58);
+    position: relative;
+    border: 1px solid rgba(239, 68, 68, .22);
+  }
+  .constellation-nav .project-square:hover,
+  .constellation-nav .project-square:focus-visible {
+    --square-bg: var(--active-bg);
+    --square-ink: var(--active-ink);
+    border-color: var(--active-border);
+    color: var(--square-ink);
+    transform: translateY(-2px);
+    box-shadow: 0 0 14px var(--active-glow);
+  }
+  .constellation-nav .project-square::after {
+    content: attr(aria-label);
+    position: absolute;
+    top: calc(100% + 9px); left: 50%; z-index: 70;
+    padding: 4px 7px;
+    border: 1px solid var(--active-bg);
+    border-radius: 4px;
+    background: #0a0a0e;
+    color: #f2f2f5;
+    font-family: var(--mono); font-size: .62rem; line-height: 1.2;
+    letter-spacing: .04em; white-space: nowrap;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transform: translate(-50%, -3px);
+    transition: opacity .16s ease, transform .16s ease, visibility .16s ease;
+  }
+  .constellation-nav .project-square:hover::after,
+  .constellation-nav .project-square:focus-visible::after {
+    opacity: 1; visibility: visible;
+    transform: translate(-50%, 0);
+  }
+  .project-square:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  .project-square[aria-current="page"] { box-shadow: inset 0 0 0 2px #fff; }
+  .project-current { flex: none; box-shadow: inset 0 0 0 2px #fff; }
+  .constellation-nav .project-hyperplex {
+    --active-bg: #4d7cff;
+    --active-ink: #fff;
+    --active-border: #91aaff;
+    --active-glow: rgba(77, 124, 255, .58);
+  }
+  .constellation-nav .project-ariadne {
+    --active-bg: #fbbf24;
+    --active-ink: #060608;
+    --active-border: #ffe08a;
+    --active-glow: rgba(251, 191, 36, .55);
+  }
+  .constellation-nav .project-raft {
+    --active-bg: #67dfc2;
+    --active-ink: #060608;
+    --active-border: #b6f3e4;
+    --active-glow: rgba(103, 223, 194, .55);
+  }
+  .project-opbdh { --square-bg: #ef4444; --square-ink: #fff; }
 
   /* ---------- layout ---------- */
   .layout {
@@ -275,21 +347,34 @@
 
   @media (max-width: 700px) {
     .top .sub { display: none; }
+    .top { padding-right: 14px; padding-left: 14px; }
+    .top .resource-nav { display: none; }
+  }
+
+  @media (max-width: 390px) {
+    .project-square { width: 26px; height: 26px; }
+    .constellation-nav { gap: 4px; }
   }
 
   @media (prefers-reduced-motion: reduce) {
     #term-body .caret { animation: none; }
     .console { transition: none; }
+    .project-square, .constellation-nav .project-square::after { transition: none; }
   }
 </style>
 </head>
 <body>
 
 <header class="top">
-  <span class="dot" aria-hidden="true"></span>
+  <span class="project-square project-opbdh project-current" aria-hidden="true">◉</span>
   <h1>OPBDH</h1>
+  <nav class="constellation-nav" aria-label="Hyperplex projects">
+    <a class="project-square project-hyperplex" href="https://hyperplex.org" aria-label="Hyperplex" title="Hyperplex"><span aria-hidden="true">⟡</span></a>
+    <a class="project-square project-ariadne" href="https://ariadne.hyperplex.org" aria-label="Ariadne" title="Ariadne"><span aria-hidden="true">⌇</span></a>
+    <a class="project-square project-raft" href="https://github.com/lumpenspace/raft" aria-label="Raft" title="Raft"><span aria-hidden="true">≋</span></a>
+  </nav>
   <span class="sub">“Of course I can do it, Dave.”</span>
-  <nav>
+  <nav class="resource-nav" aria-label="Project resources">
     <a href="https://github.com/lumpenspace/opbdh">GitHub</a>
     <a href="https://pypi.org/project/opbdh/">PyPI</a>
   </nav>
