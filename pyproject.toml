@@ -33,9 +33,6 @@ dependencies = [
   "typer>=0.12",
 ]
 
-[tool.uv.sources]
-modelchoice = { path = "../fash/modelchoice", editable = true }
-
 [project.urls]
 Homepage = "https://github.com/lumpenspace/opbdh"
 Issues = "https://github.com/lumpenspace/opbdh/issues"
