@@ -522,7 +522,10 @@ version = "0.1.0"
 source = { editable = "../fash/modelchoice" }
 
 [package.metadata]
-requires-dist = [{ name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" }]
+requires-dist = [
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
+]
 
 [[package]]
 name = "more-itertools"
