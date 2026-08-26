@@ -116,6 +116,24 @@ class TestLaunch:
         assert events == []
         assert opbdh.event_messages(events) == []
 
+    def test_insufficient_credit_error_propagates_from_launch(
+        self, monkeypatch, isolated_config, code_dir
+    ) -> None:
+        error = opbdh.InsufficientCreditsError(
+            "Insufficient RunPod credits: $1.25 left; this pod costs approximately "
+            "$2.00/hr. Add funds to your RunPod account and try again."
+        )
+
+        def fail_run(*args, **kwargs):
+            raise error
+
+        monkeypatch.setattr("opbdh.api.run_plan", fail_run)
+
+        with pytest.raises(opbdh.InsufficientCreditsError) as exc_info:
+            launch(code_dir, run_id="run-credit-error")
+
+        assert exc_info.value is error
+
 
 class TestReporter:
     def test_reporter_forwards_events_and_skips_the_eye_when_quiet(self) -> None:

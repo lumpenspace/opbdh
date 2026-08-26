@@ -35,6 +35,7 @@ from .config import OpbdhConfig, load_config
 from .estimate import GOALS, MemoryEstimate, estimate_for_model
 from .gpu import GpuOffer, candidate_gpus
 from .hf import ModelSizeEstimate, estimate_model_size_gb, suggested_network_volume_gb
+from .remote import InsufficientCreditsError, RunpodBalance, runpod_balance
 from .runpod import (
     MaxSpendReached,
     OpbdhPlan,
@@ -48,11 +49,13 @@ from .verify import VerificationResult, verify_code
 
 __all__ = [
     "GOALS",
+    "InsufficientCreditsError",
     "MaxSpendReached",
     "OpbdhConfig",
     "OpbdhPlan",
     "OpbdhRunResult",
     "RunEvent",
+    "RunpodBalance",
     "collect_events",
     "configure",
     "estimate_memory",
@@ -61,6 +64,7 @@ __all__ = [
     "gpu_options",
     "launch",
     "plan",
+    "runpod_balance",
     "search_models",
     "suggest_volume_gb",
     "summarize",
@@ -135,9 +139,10 @@ def launch(
     otherwise an :class:`OpbdhRunResult` whose ``outputs_dir`` holds whatever
     the remote job wrote to ``$OPBDH_RESULTS_DIR``.
 
-    Raises :class:`MaxSpendReached` if the spend guard trips mid-run, and
-    RuntimeError if the remote job exits non-zero (results synced so far are
-    still on disk). The pod is always cleaned up.
+    Raises :class:`MaxSpendReached` if the spend guard trips mid-run,
+    :class:`InsufficientCreditsError` if RunPod rejects the launch for lack of
+    credit, and RuntimeError if the remote job exits non-zero (results synced
+    so far are still on disk). The pod is always cleaned up.
     """
     return run_plan(
         plan(code, config_file=config_file, run_id=run_id, **overrides),

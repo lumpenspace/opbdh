@@ -54,6 +54,9 @@ Useful keywords beyond the config fields:
 
 Errors:
 
+- `InsufficientCreditsError` — RunPod rejected the pod launch for lack of
+  credit. Its message includes the current balance when available, approximate
+  pod rate, and the action to take.
 - `MaxSpendReached` — the spend guard tripped mid-run. Results synced so far
   are still on disk.
 - `RuntimeError` — the remote job exited non-zero, or the provider could not
@@ -70,14 +73,23 @@ def show(event):
 opbdh.launch("./train", model="...", on_event=show)
 ```
 
-`event.kind` is `"status"` for stage changes, `"output"` for remote stdout
-captured after a failure, and `"error"` for remote stderr. To collect rather
-than print:
+`event.kind` is `"status"` for stage changes, `"billing"` for RunPod balance
+updates, `"output"` for remote stdout captured after a failure, and `"error"`
+for remote stderr. To collect rather than print:
 
 ```python
 events, sink = opbdh.collect_events()
 opbdh.launch("./train", model="...", on_event=sink)
 print(opbdh.event_messages(events, kind="error"))
+```
+
+The same fail-soft account lookup is available directly. It returns `None`
+when credentials, the network, or RunPod's response are unavailable:
+
+```python
+account = opbdh.runpod_balance()
+if account is not None:
+    print(account.client_balance, account.current_spend_per_hour)
 ```
 
 ## Planning without spending

@@ -18,12 +18,15 @@ from typing import Any, Self
 from .remote import (
     RUNPOD_CACHE_ROOT,
     RUNPOD_NETWORK_CACHE_ROOT,
+    InsufficientCreditsError,
+    RunpodBalance,
     RunpodSshTarget,
     _runpod_rest,
     create_runpod_pod,
     delete_runpod_pod,
     extract_runpod_ssh_target,
     remote_bash_command,
+    runpod_balance,
     scp_base,
     ssh_base,
     wait_for_runpod_pod,
@@ -104,8 +107,9 @@ class OpbdhRunResult:
 class RunEvent:
     """A progress notification from :func:`run_plan`.
 
-    ``kind`` is one of ``"status"`` (a stage began), ``"output"`` (remote
-    stdout captured after a failure), or ``"error"`` (remote stderr).
+    ``kind`` is one of ``"status"`` (a stage began), ``"billing"`` (a
+    RunPod balance update), ``"output"`` (remote stdout captured after a
+    failure), or ``"error"`` (remote stderr).
     """
 
     kind: str
@@ -141,6 +145,41 @@ class _Reporter:
     def __exit__(self, exc_type, exc, traceback) -> None:
         if self._eye is not None:
             self._eye.__exit__(exc_type, exc, traceback)
+
+
+def _runpod_balance_or_none() -> RunpodBalance | None:
+    """Keep account telemetry from ever affecting the run lifecycle."""
+    try:
+        return runpod_balance()
+    except Exception:
+        return None
+
+
+def _starting_balance_message(balance: RunpodBalance, *, hourly_dollars: float) -> str | None:
+    if balance.client_balance is None:
+        return None
+    message = f"${balance.client_balance:.2f} left · this pod ~${hourly_dollars:.2f}/hr"
+    current_burn = balance.current_spend_per_hour
+    # The account-wide burn can briefly remain zero while a new pod starts.
+    # The known pod rate still gives a useful, divide-by-zero-safe runway.
+    runway_burn = current_burn if current_burn is not None and current_burn > 0 else hourly_dollars
+    if runway_burn > 0:
+        runway_hours = balance.client_balance / runway_burn
+        message += f" · ~{runway_hours:.0f}h"
+    return message
+
+
+def _ending_balance_message(balance: RunpodBalance) -> str | None:
+    if balance.client_balance is None:
+        return None
+    return f"${balance.client_balance:.2f} left after run"
+
+
+def _runpod_hourly_dollars(plan: OpbdhPlan, gpu_type_id: str) -> float:
+    per_gpu_hourly = estimated_hourly(gpu_type_id, plan.config.cloud_type)
+    if per_gpu_hourly is not None:
+        return per_gpu_hourly * max(1, int(plan.config.gpu_count))
+    return plan.estimated_hourly_dollars or 0.0
 
 
 def _should_include(relative: Path) -> bool:
@@ -570,8 +609,10 @@ def run_plan(
     network_volume_id = ""
     selected_gpu_type = ""
     delete_pod = True
+    reporter: _Reporter | None = None
     try:
-        with _Reporter("preparing the mission", progress=progress, on_event=on_event) as eye:
+        reporter = _Reporter("preparing the mission", progress=progress, on_event=on_event)
+        with reporter as eye:
             if provider == "runpod":
                 network_volume_id = ensure_network_volume(plan)
             bundle = build_bundle(
@@ -618,25 +659,50 @@ def run_plan(
                     _effective_gpu_types = _filtered if _filtered else plan.gpu_type_ids
                 else:
                     _effective_gpu_types = plan.gpu_type_ids
-                pod_id, ssh_label, selected_gpu_type = create_runpod_pod(
-                    gpu_count=plan.config.gpu_count,
-                    name=f"opbdh-{plan.run_id}",
-                    cloud_type=plan.config.cloud_type,
-                    public_key=public_key_text,
-                    gpu_types=_effective_gpu_types,
-                    image=plan.config.image,
-                    volume_gb=plan.config.pod_volume_gb,
-                    container_disk_gb=plan.config.container_disk_gb,
-                    min_vcpu_per_gpu=plan.config.min_vcpu_per_gpu,
-                    min_ram_per_gpu_gb=plan.config.min_ram_per_gpu_gb,
-                    network_volume_id=network_volume_id,
-                    search_from=plan.code_path.parent,
-                )
-                hourly = estimated_hourly(selected_gpu_type, plan.config.cloud_type) or plan.estimated_hourly_dollars or 0.0
+                try:
+                    pod_id, ssh_label, selected_gpu_type = create_runpod_pod(
+                        gpu_count=plan.config.gpu_count,
+                        name=f"opbdh-{plan.run_id}",
+                        cloud_type=plan.config.cloud_type,
+                        public_key=public_key_text,
+                        gpu_types=_effective_gpu_types,
+                        image=plan.config.image,
+                        volume_gb=plan.config.pod_volume_gb,
+                        container_disk_gb=plan.config.container_disk_gb,
+                        min_vcpu_per_gpu=plan.config.min_vcpu_per_gpu,
+                        min_ram_per_gpu_gb=plan.config.min_ram_per_gpu_gb,
+                        network_volume_id=network_volume_id,
+                        search_from=plan.code_path.parent,
+                    )
+                except InsufficientCreditsError as exc:
+                    balance = _runpod_balance_or_none()
+                    balance_text = (
+                        f"${balance.client_balance:.2f} left; "
+                        if balance is not None and balance.client_balance is not None
+                        else "current balance unavailable; "
+                    )
+                    attempted_gpu_type = _effective_gpu_types[0] if _effective_gpu_types else ""
+                    approximate_hourly = _runpod_hourly_dollars(plan, attempted_gpu_type)
+                    hourly_text = (
+                        f"this pod costs approximately ${approximate_hourly:.2f}/hr. "
+                        if approximate_hourly > 0
+                        else "this pod's hourly price is unavailable. "
+                    )
+                    raise InsufficientCreditsError(
+                        f"Insufficient RunPod credits: {balance_text}{hourly_text}"
+                        "Add funds to your RunPod account and try again."
+                    ) from exc
+                hourly = _runpod_hourly_dollars(plan, selected_gpu_type)
             _append_local_log(local_log, f"Pod {pod_id} requested on {selected_gpu_type}.")
             # Billing starts when the pod is created, not when the job starts.
             start = time.time()
             eye.set_billing(started_at=start, hourly_dollars=hourly)
+            if provider == "runpod":
+                balance = _runpod_balance_or_none()
+                if balance is not None:
+                    balance_message = _starting_balance_message(balance, hourly_dollars=hourly)
+                    if balance_message is not None:
+                        eye.emit("billing", balance_message)
             eye.update(f"waiting for pod {pod_id} to boot")
             if provider == "primeintellect":
                 pod = wait_for_pi_pod(pod_id)
@@ -747,6 +813,12 @@ def run_plan(
                 _append_local_log(local_log, f"{provider} pod {pod_id} deleted.")
             except Exception as exc:
                 _append_local_log(local_log, f"Pod deletion failed: {exc}")
+        if provider == "runpod" and pod_id and reporter is not None:
+            balance = _runpod_balance_or_none()
+            if balance is not None:
+                balance_message = _ending_balance_message(balance)
+                if balance_message is not None:
+                    reporter.emit("billing", balance_message)
 
 
 def plan_summary(plan: OpbdhPlan) -> dict[str, Any]:

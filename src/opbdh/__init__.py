@@ -12,11 +12,13 @@ See :func:`opbdh.launch`, :func:`opbdh.plan`, and :mod:`opbdh.api`.
 
 from .api import (
     GOALS,
+    InsufficientCreditsError,
     MaxSpendReached,
     OpbdhConfig,
     OpbdhPlan,
     OpbdhRunResult,
     RunEvent,
+    RunpodBalance,
     collect_events,
     configure,
     estimate_memory,
@@ -25,6 +27,7 @@ from .api import (
     gpu_options,
     launch,
     plan,
+    runpod_balance,
     search_models,
     suggest_volume_gb,
     summarize,
@@ -39,6 +42,7 @@ __all__ = [
     "summarize",
     "configure",
     "verify",
+    "runpod_balance",
     # Sizing helpers
     "estimate_model_size",
     "estimate_memory",
@@ -50,7 +54,9 @@ __all__ = [
     "OpbdhPlan",
     "OpbdhRunResult",
     "RunEvent",
+    "RunpodBalance",
     "MaxSpendReached",
+    "InsufficientCreditsError",
     "GOALS",
     # Event helpers
     "collect_events",

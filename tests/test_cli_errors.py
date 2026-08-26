@@ -5,7 +5,8 @@ import typer
 
 from opbdh.cli import _execute_run
 from opbdh.config import OpbdhConfig
-from opbdh.runpod import OpbdhPlan
+from opbdh.remote import InsufficientCreditsError
+from opbdh.runpod import OpbdhPlan, RunEvent
 
 @pytest.fixture
 def mock_config():
@@ -44,6 +45,68 @@ def test_insufficient_balance_error(mock_print, mock_make_plan, mock_run_plan, m
     assert exc_info.value.exit_code == 1
     printed_texts = [call.args[0] for call in mock_print.call_args_list if call.args]
     assert any("Insufficient RunPod Balance" in str(text) for text in printed_texts)
+
+
+@patch("opbdh.cli.run_plan")
+@patch("opbdh.cli.make_plan")
+@patch("opbdh.cli.console.print")
+def test_typed_insufficient_credit_error_prints_enriched_message(
+    mock_print, mock_make_plan, mock_run_plan, mock_config, mock_plan
+):
+    message = (
+        "RunPod has insufficient credits: $1.25 left; this pod costs ~$2.00/hr. "
+        "Add funds to your RunPod account and try again."
+    )
+    mock_make_plan.return_value = mock_plan
+    mock_run_plan.side_effect = InsufficientCreditsError(message)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        _execute_run(mock_config, dry_run=False, yes=True)
+
+    assert exc_info.value.exit_code == 1
+    printed_texts = [str(call.args[0]) for call in mock_print.call_args_list if call.args]
+    assert any(message in text for text in printed_texts)
+
+
+@patch("opbdh.cli.run_plan")
+@patch("opbdh.cli.make_plan")
+@patch("opbdh.cli.console.print")
+def test_billing_events_are_printed_but_status_events_are_not(
+    mock_print, mock_make_plan, mock_run_plan, mock_config, mock_plan
+):
+    def emit_events(*args, **kwargs):
+        sink = kwargs["on_event"]
+        sink(RunEvent("status", "requesting a pod"))
+        sink(RunEvent("billing", "$39.70 left · this pod ~$1.69/hr · ~23h"))
+        return None
+
+    mock_make_plan.return_value = mock_plan
+    mock_run_plan.side_effect = emit_events
+
+    _execute_run(mock_config, dry_run=False, yes=True)
+
+    printed_texts = [str(call.args[0]) for call in mock_print.call_args_list if call.args]
+    assert any("$39.70 left" in text for text in printed_texts)
+    assert not any("requesting a pod" in text for text in printed_texts)
+
+
+@patch("opbdh.cli.run_plan")
+@patch("opbdh.cli.make_plan")
+@patch("opbdh.cli.console.print")
+def test_balance_fallback_uses_prime_intellect_provider_name(
+    mock_print, mock_make_plan, mock_run_plan, mock_config, mock_plan
+):
+    mock_config.provider = "primeintellect"
+    mock_make_plan.return_value = mock_plan
+    mock_run_plan.side_effect = RuntimeError("Payment required by provider.")
+
+    with pytest.raises(typer.Exit) as exc_info:
+        _execute_run(mock_config, dry_run=False, yes=True)
+
+    assert exc_info.value.exit_code == 1
+    printed_texts = [str(call.args[0]) for call in mock_print.call_args_list if call.args]
+    assert any("Insufficient Prime Intellect Balance" in text for text in printed_texts)
+    assert any("Please add funds to your Prime Intellect account" in text for text in printed_texts)
 
 
 @patch("opbdh.cli.run_plan")

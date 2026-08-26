@@ -6,6 +6,7 @@ import shlex
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,16 @@ RUNPOD_CACHE_ROOT = "/root/.cache/opbdh"
 RUNPOD_NETWORK_CACHE_ROOT = "/workspace/opbdh-cache"
 
 
+class InsufficientCreditsError(RuntimeError):
+    """RunPod refused to create a pod because the account lacks credit."""
+
+
+@dataclass(frozen=True, slots=True)
+class RunpodBalance:
+    client_balance: float | None
+    current_spend_per_hour: float | None
+
+
 @dataclass(frozen=True, slots=True)
 class RunpodSshTarget:
     host: str
@@ -43,6 +54,40 @@ def runpod_api_token(api_token: str | None = None) -> str:
     if not token:
         raise ValueError("RUNPOD_API_TOKEN or RUNPOD_API_KEY is required")
     return token
+
+
+def runpod_balance(api_token: str | None = None, *, timeout: int = 5) -> RunpodBalance | None:
+    """Return RunPod account credit and current hourly spend, if available.
+
+    Account visibility is advisory and must never prevent a launch, so token,
+    HTTP, and response-parsing failures all return ``None``.
+    """
+    try:
+        token = runpod_api_token(api_token)
+        query = "query { myself { clientBalance currentSpendPerHr } }"
+        request = urllib.request.Request(
+            "https://api.runpod.io/graphql?" + urllib.parse.urlencode({"api_key": token}),
+            data=json.dumps({"query": query}).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "opbdh/1.0",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        data = payload.get("data") if isinstance(payload, dict) else None
+        myself = data.get("myself") if isinstance(data, dict) else None
+        if not isinstance(myself, dict):
+            return None
+        client_balance = myself.get("clientBalance")
+        current_spend = myself.get("currentSpendPerHr")
+        return RunpodBalance(
+            client_balance=float(client_balance) if client_balance is not None else None,
+            current_spend_per_hour=float(current_spend) if current_spend is not None else None,
+        )
+    except Exception:
+        return None
 
 
 def _runpod_rest(
@@ -69,7 +114,13 @@ def _runpod_rest(
             raw = response.read()
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore").strip()
-        raise RuntimeError(f"RunPod API {method} {path} failed with HTTP {exc.code}: {detail or exc.reason}") from exc
+        message = f"RunPod API {method} {path} failed with HTTP {exc.code}: {detail or exc.reason}"
+        credit_words = ("credit", "balance", "funds", "payment")
+        provider_detail = f"{detail} {exc.reason}".lower()
+        is_pod_create = method.upper() == "POST" and path == "/pods"
+        if is_pod_create and (exc.code == 402 or any(word in provider_detail for word in credit_words)):
+            raise InsufficientCreditsError(message) from exc
+        raise RuntimeError(message) from exc
     if not raw:
         return None
     return json.loads(raw.decode("utf-8"))
@@ -129,6 +180,8 @@ def create_runpod_pod(
                     raise RuntimeError(f"unexpected RunPod create response: {data!r}")
                 target = extract_runpod_ssh_target(data)
                 return str(data["id"]), target.label() if target else "", gpu_type
+            except InsufficientCreditsError:
+                raise
             except Exception as exc:
                 last_error = exc
     raise RuntimeError(f"failed to create RunPod pod for configured GPU types: {last_error}")

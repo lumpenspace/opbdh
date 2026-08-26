@@ -17,7 +17,8 @@ from .estimate import GOALS, estimate_for_model
 from .gpu import candidate_gpus
 from .hal import QUOTE_OVERSPEND, QUOTE_REFUSAL, QUOTE_SUCCESS, hal_says
 from .hf import estimate_model_size_gb, suggested_network_volume_gb
-from .runpod import MaxSpendReached, make_plan, plan_summary, run_plan
+from .remote import InsufficientCreditsError
+from .runpod import MaxSpendReached, RunEvent, make_plan, plan_summary, run_plan
 from .verify import verify_code
 
 
@@ -270,6 +271,11 @@ def _warn_ignored_volume_options(config: OpbdhConfig) -> None:
         )
 
 
+def _print_run_event(event: RunEvent) -> None:
+    if event.kind == "billing":
+        console.print(event.message)
+
+
 def _execute_run(config: OpbdhConfig, *, dry_run: bool, yes: bool) -> None:
     if not config.code:
         raise typer.BadParameter("Code path is required, either as an argument or config.code.")
@@ -291,11 +297,14 @@ def _execute_run(config: OpbdhConfig, *, dry_run: bool, yes: bool) -> None:
         raise typer.Exit(1)
     while True:
         try:
-            result = run_plan(opbdh_plan)
+            result = run_plan(opbdh_plan, on_event=_print_run_event)
             break
         except MaxSpendReached as exc:
             hal_says(QUOTE_OVERSPEND)
             console.print(f"[red]{exc}[/] Results synced so far are in {opbdh_plan.results_dir}.")
+            raise typer.Exit(1) from exc
+        except InsufficientCreditsError as exc:
+            console.print(f"\n[red]{exc}[/]")
             raise typer.Exit(1) from exc
         except RuntimeError as exc:
             msg = str(exc)
