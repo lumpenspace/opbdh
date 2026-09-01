@@ -31,7 +31,17 @@ RUNPOD_NETWORK_CACHE_ROOT = "/workspace/opbdh-cache"
 
 
 class InsufficientCreditsError(RuntimeError):
-    """RunPod refused to create a pod because the account lacks credit."""
+    """RunPod refused to create a pod because the account lacks credit.
+
+    ``status_code`` is the provider's HTTP status. 402 is definitive; anything
+    else means the classification came from wording in the provider's message
+    and should be checked against the real balance before being reported as a
+    money problem.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +129,10 @@ def _runpod_rest(
         provider_detail = f"{detail} {exc.reason}".lower()
         is_pod_create = method.upper() == "POST" and path == "/pods"
         if is_pod_create and (exc.code == 402 or any(word in provider_detail for word in credit_words)):
-            raise InsufficientCreditsError(message) from exc
+            # Wording alone is a suspicion, not a verdict — providers mention
+            # "check your credit balance" in capacity errors too. The status
+            # travels so the caller can confirm against the real balance.
+            raise InsufficientCreditsError(message, status_code=exc.code) from exc
         raise RuntimeError(message) from exc
     if not raw:
         return None

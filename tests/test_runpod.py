@@ -215,3 +215,37 @@ def test_run_plan_prints_remote_logs_on_failure(
         
     printed_texts = [call.args[0] for call in mock_print.call_args_list if call.args]
     assert any("Traceback: critical remote failure" in str(text) for text in printed_texts)
+
+
+def test_credit_wording_is_not_reported_as_insufficient_when_funded(
+    monkeypatch, mock_plan, successful_runpod_lifecycle
+):
+    """Providers say "check your credit balance" in capacity errors too. A
+    non-402 classification is a suspicion, so a visibly funded account must
+    get the real error rather than being told it is out of money."""
+    successful_runpod_lifecycle["create"].side_effect = InsufficientCreditsError(
+        "RunPod API POST /pods failed with HTTP 500: no capacity; check your credit balance",
+        status_code=500,
+    )
+    successful_runpod_lifecycle["balance"].return_value = RunpodBalance(35.96, 0.12)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        run_plan(mock_plan, progress=False, interactive=False)
+
+    assert not isinstance(excinfo.value, InsufficientCreditsError)
+    assert "no capacity" in str(excinfo.value)
+
+
+def test_http_402_is_still_definitive_even_when_the_balance_looks_fine(
+    monkeypatch, mock_plan, successful_runpod_lifecycle
+):
+    """402 is the provider stating a payment problem; a stale-looking balance
+    must not override it."""
+    successful_runpod_lifecycle["create"].side_effect = InsufficientCreditsError(
+        "RunPod API POST /pods failed with HTTP 402: Payment Required",
+        status_code=402,
+    )
+    successful_runpod_lifecycle["balance"].return_value = RunpodBalance(35.96, 0.12)
+
+    with pytest.raises(InsufficientCreditsError):
+        run_plan(mock_plan, progress=False, interactive=False)

@@ -47,6 +47,19 @@ def test_insufficient_balance_error(mock_print, mock_make_plan, mock_run_plan, m
     assert any("Insufficient RunPod Balance" in str(text) for text in printed_texts)
 
 
+@patch("opbdh.cli.make_plan")
+@patch("opbdh.cli.console.print")
+def test_plan_constraint_error_is_printed_without_traceback(mock_print, mock_make_plan, mock_config):
+    message = "No configured RunPod GPU estimate satisfies 4 GB VRAM x1 under 0.5/hr."
+    mock_make_plan.side_effect = ValueError(message)
+
+    with pytest.raises(typer.Exit) as exc_info:
+        _execute_run(mock_config, dry_run=True, yes=False)
+
+    assert exc_info.value.exit_code == 1
+    assert any(message in str(call.args[0]) for call in mock_print.call_args_list if call.args)
+
+
 @patch("opbdh.cli.run_plan")
 @patch("opbdh.cli.make_plan")
 @patch("opbdh.cli.console.print")

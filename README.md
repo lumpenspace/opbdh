@@ -28,6 +28,54 @@ opbdh launch ./run.py --model Qwen/Qwen2.5-0.5B-Instruct --vram-gb 48 --max-spen
 
 This verifies your code, picks the cheapest fitting GPU, launches the pod, runs your command, streams remote `logs/` and `results/` into `runpod_results/<run_id>/`, stops the run if estimated spend crosses the cap, and deletes the pod when it finishes — or fails. Add `--dry-run` to print the plan without contacting the provider; real launches ask for confirmation unless `--yes`.
 
+## Fine-tune a model
+
+Install the optional fine-tuning support, then start the interactive SFT console:
+
+```bash
+pip install "opbdh[ft]"
+opbdh ft
+```
+
+The native format is intentionally easy to edit. A base-model example can be one small TOML file:
+
+```toml
+input = "Translate hello to Italian"
+output = "Ciao"
+tags = ["translation", "short"]
+```
+
+For a chat model, `input` is the conversation and `output` is the assistant response to learn:
+
+```toml
+output = "Ciao! Come posso aiutarti?"
+tags = ["italian", "greeting"]
+
+[[input]]
+role = "system"
+content = "Reply in Italian."
+
+[[input]]
+role = "user"
+content = "Hello!"
+```
+
+A file may contain one example or an `[[examples]]` list, and a dataset may mix files and directories. In the console you can also create examples from scratch, import OpenAI or Anthropic data, add/rename/remove tags, choose tag groups for a run, and preview the automatically selected pod before launching.
+
+The examples are shared by named recipes, so the same dataset can support independent LoRA, QLoRA, and Full experiments with different hyperparameters, tag selections, providers, and GPU counts. For example:
+
+```bash
+opbdh ft --data ./examples --model Qwen/Qwen3-8B \
+  --model-type chat --recipe qlora-2gpu --method qlora --gpu-count 2
+
+opbdh ft:import openai.jsonl --format openai --tag imported
+opbdh ft:import anthropic.jsonl --format anthropic -o examples.toml
+```
+
+OPBDH normalizes the selected examples, estimates VRAM/RAM/disk from the model and technique, generates a TRL + Accelerate training job, and passes it through the regular confirmation, spend guard, result sync, and cleanup lifecycle. The editable dataset, recipes, generated jobs, and result history stay under `.opbdh/`, so running `opbdh ft` again from the same project resumes where you left off.
+
+Read the [fine-tuning guide on the documentation site](https://opbdh.hyperplex.org/finetuning.html) or its [repository Markdown version](docs/FINETUNING.md) for the complete format, defaults, tag workflow, imports, recipes, multi-GPU behavior, and non-interactive flags.
+
 ## From Python
 
 The same thing, as a library:
@@ -53,6 +101,8 @@ always cleans up its pod. Full reference in [docs/API.md](docs/API.md).
 - 🐍 **CLI or library** — every command is a function call; see [docs/API.md](docs/API.md)
 - 💸 **Cost-aware by default** — hourly price caps, a hard max-spend guard, a confirmation gate
 - 🎯 **GPU selection from a budget** — say how much VRAM and how many dollars
+- 🧠 **Simple SFT** — editable TOML examples, OpenAI/Anthropic imports, tag groups, automatic sizing, LoRA/QLoRA/full training
+- 🖥️ **Multi-GPU pods** — request and correctly price more than one GPU on RunPod or Prime Intellect
 - 💾 **Persistent model cache** — network volumes sized from the model's real weight files, reused across runs (RunPod)
 - 🧪 **Nothing launches unverified** — static checks and a `--dry-run` mode
 - 🧙 **Wizards or flags** — first-run setup, `opbdh config wizard`, `opbdh run wizard`; or plain flags (each with a one-letter short form) and layered JSON config
@@ -69,6 +119,7 @@ Flags override a local `opbdh.json`/`.opbdh.json`, which overrides `~/.config/op
 | `--command, -x` | Remote shell command; defaults from the code path |
 | `--provider, -p` | `runpod` (default) or `primeintellect` |
 | `--vram-gb, -v` | Minimum GPU VRAM |
+| `--gpu-count, -g` | GPUs in the pod; whole-pod pricing and spend caps scale with it |
 | `--max-dollars-per-hour, -d` | Cap on the estimated hourly price |
 | `--max-spend, -s` | Spend guard: stop the run past this estimated total |
 | `--network-volume-id, -V` | Attach an existing RunPod network volume |
@@ -82,7 +133,7 @@ Flags override a local `opbdh.json`/`.opbdh.json`, which overrides `~/.config/op
 
 Config-only keys, one each: `image` (Docker tag, or Prime Intellect environment name), `cloud_type` (`SECURE`/`COMMUNITY`/`ALL`), `container_disk_gb`, `pod_volume_gb`, `network_volume_name`, `network_volume_size_gb`, `pre_download_model` (default on), `results_dir`, `poll_seconds`, `failure_keepalive_seconds` (debug window on failure, default 120 s), `keep_pod_on_success`, `ssh_key`/`ssh_public_key`.
 
-Other commands, one each: `opbdh plan` (show the plan for a run), `opbdh verify` (static checks only), `opbdh gpus` (GPU candidates and prices), `opbdh models search`/`size` (find models, weight size + suggested volume), `opbdh config show`/`write`/`wizard`.
+Other commands, one each: `opbdh ft` (interactive or flag-driven supervised fine-tuning), `opbdh ft:import` (normalize OpenAI/Anthropic data), `opbdh plan` (show the plan for a run), `opbdh verify` (static checks only), `opbdh gpus` (GPU candidates and prices), `opbdh models search`/`size` (find models, weight size + suggested volume), `opbdh config show`/`write`/`wizard`.
 
 On the pod, your script runs with `OPBDH_MODEL_ID`, `OPBDH_RESULTS_DIR`, and the HF cache variables set; a sibling `requirements.txt` is pip-installed; write to `logs/` and `results/` and they come home. Network volumes are never deleted by OPBDH and bill by the GB-month — clean them up in the RunPod console.
 

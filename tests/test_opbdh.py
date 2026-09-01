@@ -80,6 +80,28 @@ def test_bundle_excludes_dotenv_files(tmp_path: Path) -> None:
     assert not any(".env" in name for name in names)
 
 
+def test_bundle_excludes_local_finetune_metadata_from_normal_runs(tmp_path: Path) -> None:
+    code_dir = tmp_path / "project"
+    code_dir.mkdir()
+    (code_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
+    metadata = code_dir / ".opbdh" / "finetune"
+    metadata.mkdir(parents=True)
+    (metadata / "data.toml").write_text('input = "private"\noutput = "example"\n', encoding="utf-8")
+
+    bundle = build_bundle(
+        OpbdhConfig(),
+        code_path=code_dir,
+        command="python /opbdh-run/user/run.py",
+        run_id="abc",
+    )
+
+    with tarfile.open(fileobj=io.BytesIO(bundle), mode="r:gz") as archive:
+        names = set(archive.getnames())
+
+    assert "user/run.py" in names
+    assert not any(".opbdh" in name for name in names)
+
+
 def test_job_script_does_not_embed_hf_token(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HF_TOKEN", "hf_supersecret")
     script = tmp_path / "run.py"

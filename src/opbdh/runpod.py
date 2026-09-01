@@ -58,6 +58,7 @@ RUN_ROOT = "/opbdh-run"
 EXCLUDED_NAMES = {
     ".DS_Store",
     ".git",
+    ".opbdh",
     ".mypy_cache",
     ".pytest_cache",
     ".ruff_cache",
@@ -676,6 +677,19 @@ def run_plan(
                     )
                 except InsufficientCreditsError as exc:
                     balance = _runpod_balance_or_none()
+                    attempted = _effective_gpu_types[0] if _effective_gpu_types else ""
+                    affordable = _runpod_hourly_dollars(plan, attempted)
+                    # Only 402 is the provider stating a payment problem. Anything
+                    # else was inferred from wording, so if the balance visibly
+                    # covers this pod, report the real error instead of telling a
+                    # funded user they are out of money.
+                    if (
+                        getattr(exc, "status_code", None) != 402
+                        and balance is not None
+                        and balance.client_balance is not None
+                        and balance.client_balance >= max(affordable, 0.0)
+                    ):
+                        raise RuntimeError(str(exc)) from exc
                     balance_text = (
                         f"${balance.client_balance:.2f} left; "
                         if balance is not None and balance.client_balance is not None
@@ -822,17 +836,26 @@ def run_plan(
 
 
 def plan_summary(plan: OpbdhPlan) -> dict[str, Any]:
-    return {
+    provider = normalized_provider(plan.config)
+    uses_network_volume = provider == "runpod" and bool(
+        plan.network_volume_id or plan.config.auto_network_volume
+    )
+    summary = {
         "run_id": plan.run_id,
+        "provider": provider,
         "model_id": plan.config.model_id,
         "code_path": str(plan.code_path),
         "command": plan.command,
+        "gpu_count": plan.config.gpu_count,
         "gpu_candidates": plan.gpu_type_ids,
         "estimated_hourly_dollars": plan.estimated_hourly_dollars,
         "max_spend_dollars": plan.config.max_spend_dollars,
         "model_size_gb": plan.model_size_gb,
-        "network_volume_id": plan.network_volume_id,
-        "network_volume_size_gb": plan.network_volume_size_gb,
+        "network_volume_id": plan.network_volume_id or "none",
+        "network_volume_size_gb": plan.network_volume_size_gb if uses_network_volume else None,
         "results_dir": str(plan.results_dir),
         "verified_files": [str(path) for path in plan.verification_checked],
     }
+    if provider == "runpod":
+        summary["cloud_type"] = plan.config.cloud_type
+    return summary

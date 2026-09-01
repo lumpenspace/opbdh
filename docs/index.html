@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OPBDH — Of course I can do it, Dave.</title>
-<meta name="description" content="OPBDH documentation. A CLI that launches a GPU pod, runs your model-backed script, brings your results home, and shuts the pod down.">
+<meta name="description" content="OPBDH documentation. Launch guarded GPU jobs or author and run LoRA, QLoRA, and Full supervised fine-tunes.">
 <link rel="canonical" href="https://opbdh.hyperplex.org/">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://opbdh.hyperplex.org/">
 <meta property="og:site_name" content="OPBDH">
 <meta property="og:title" content="OPBDH — Of course I can do it, Dave.">
-<meta property="og:description" content="One command: launch a GPU pod, run your model-backed script, sync results home, delete the pod. RunPod or Prime Intellect, with a hard spend guard.">
+<meta property="og:description" content="Launch guarded GPU jobs or turn editable examples into LoRA, QLoRA, and Full supervised fine-tunes on RunPod or Prime Intellect.">
 <meta property="og:image" content="https://opbdh.hyperplex.org/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -19,7 +19,7 @@
 <meta name="twitter:site" content="@lumpenspace">
 <meta name="twitter:creator" content="@lumpenspace">
 <meta name="twitter:title" content="OPBDH — Of course I can do it, Dave.">
-<meta name="twitter:description" content="One command: launch a GPU pod, run your model-backed script, sync results home, delete the pod. RunPod or Prime Intellect, with a hard spend guard.">
+<meta name="twitter:description" content="Launch guarded GPU jobs or turn editable examples into LoRA, QLoRA, and Full supervised fine-tunes on RunPod or Prime Intellect.">
 <meta name="twitter:image" content="https://opbdh.hyperplex.org/og.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23111'/%3E%3Ccircle cx='16' cy='16' r='10' fill='%23a00'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23ff3b00'/%3E%3Ccircle cx='16' cy='16' r='2' fill='%23ffd9a0'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -349,6 +349,7 @@
     .top .sub { display: none; }
     .top { padding-right: 14px; padding-left: 14px; }
     .top .resource-nav { display: none; }
+    .top .constellation-nav { margin-left: auto; }
   }
 
   @media (max-width: 390px) {
@@ -368,15 +369,16 @@
 <header class="top">
   <span class="project-square project-opbdh project-current" aria-hidden="true">◉</span>
   <h1>OPBDH</h1>
-  <nav class="constellation-nav" aria-label="Hyperplex projects">
+  <span class="sub">“Of course I can do it, Dave.”</span>
+  <nav class="resource-nav" aria-label="Project resources">
+    <a href="finetuning.html">Fine-tuning</a>
+    <a href="https://github.com/lumpenspace/opbdh">GitHub</a>
+    <a href="https://pypi.org/project/opbdh/">PyPI</a>
+  </nav>
+  <nav class="constellation-nav" aria-label="Other Hyperplex projects">
     <a class="project-square project-hyperplex" href="https://hyperplex.org" aria-label="Hyperplex" title="Hyperplex"><span aria-hidden="true">⟡</span></a>
     <a class="project-square project-ariadne" href="https://ariadne.hyperplex.org" aria-label="Ariadne" title="Ariadne"><span aria-hidden="true">⌇</span></a>
     <a class="project-square project-raft" href="https://github.com/lumpenspace/raft" aria-label="Raft" title="Raft"><span aria-hidden="true">≋</span></a>
-  </nav>
-  <span class="sub">“Of course I can do it, Dave.”</span>
-  <nav class="resource-nav" aria-label="Project resources">
-    <a href="https://github.com/lumpenspace/opbdh">GitHub</a>
-    <a href="https://pypi.org/project/opbdh/">PyPI</a>
   </nav>
 </header>
 
@@ -388,6 +390,7 @@
       <li><a href="#install">Install</a></li>
       <li><a href="#configure">Configure</a></li>
       <li><a href="#run">Run</a></li>
+      <li><a href="#fine-tuning">Fine-tune</a></li>
       <li><a href="#prime-intellect">Prime Intellect</a></li>
       <li><a href="#volumes">Model cache &amp; volumes</a></li>
       <li><a href="#environment">Your script's environment</a></li>
@@ -402,6 +405,7 @@
       <p class="kicker">Overview</p>
       <h2>What it does</h2>
       <p><strong>O</strong>pen the <strong>P</strong>od <strong>B</strong>ay <strong>D</strong>oor, <strong>H</strong>al: launches a <a href="https://www.runpod.io/">RunPod</a> or <a href="https://www.primeintellect.ai">Prime Intellect</a> GPU pod, runs your model-backed script on it, brings your results home, and shuts the pod down.</p>
+      <p>For supervised training, <a href="finetuning.html"><code>opbdh ft</code></a> turns human-editable examples into automatically sized LoRA, QLoRA, or Full jobs—including multi-GPU runs—while keeping the same cost and cleanup guarantees.</p>
       <p>One <code>opbdh launch</code> performs the whole mission. <strong>Click a step to watch it in HAL's console →</strong></p>
       <ol class="mission" id="mission">
         <li data-demo="verify"><div><b>Verify.</b> <span>Your code is checked statically — Python byte-compiles, shell scripts pass <code>bash -n</code> — before any money is spent.</span><span class="hint">▸ opbdh verify</span></div></li>
@@ -460,6 +464,24 @@ opbdh gpus --vram-gb 48                   <span class="cm"># GPU candidates + pr
 opbdh gpus --vram-gb 48 --provider primeintellect   <span class="cm"># live PI offers</span>
 opbdh models search qwen                  <span class="cm"># search Hugging Face models</span>
 opbdh models size Qwen/Qwen2.5-0.5B-Instruct   <span class="cm"># weight size + suggested volume</span></code></pre>
+    </section>
+
+    <section id="fine-tuning">
+      <p class="kicker">Training</p>
+      <h2>Supervised fine-tuning</h2>
+      <p>Install the optional fine-tuning extra and run <code>opbdh ft</code> to open an interactive SFT console:</p>
+      <pre class="block"><code>pip install <span class="st">"opbdh[ft]"</span>
+opbdh ft</code></pre>
+      <p>Load TOML, JSON, or JSONL files—or create examples in the console—then organize them with tags and train all or selected groups. The native TOML format handles both plain prompt/completion examples and chat conversations while staying comfortable to edit by hand.</p>
+      <pre class="block"><code>input = <span class="st">"Translate hello to Italian"</span>
+output = <span class="st">"Ciao"</span>
+tags = [<span class="st">"translation"</span>, <span class="st">"short"</span>]</code></pre>
+      <p>One dataset can drive any number of named LoRA, QLoRA, or Full recipes. Each recipe keeps its own model, technique, selected tags, hyperparameters, provider, spend limits, and GPU count. OPBDH sizes the pod, generates a TRL + Accelerate job, syncs the artifacts home, and keeps the dataset and recipe metadata under <code>.opbdh/</code> for the next run.</p>
+      <pre class="block"><code>opbdh ft --data ./examples --model Qwen/Qwen3-8B \
+  --model-type chat --recipe qlora-2gpu --method qlora --gpu-count 2
+
+opbdh ft:import openai.jsonl --format openai --tag imported</code></pre>
+      <p><a href="finetuning.html"><strong>Read the complete fine-tuning guide →</strong></a></p>
     </section>
 
     <section id="prime-intellect">
@@ -552,7 +574,7 @@ pytest</code></pre>
 </div>
 
 <footer>
-  <p><a href="https://github.com/lumpenspace/opbdh">GitHub</a> · <a href="https://pypi.org/project/opbdh/">PyPI</a> · MIT License</p>
+  <p><a href="finetuning.html">Fine-tuning</a> · <a href="https://github.com/lumpenspace/opbdh">GitHub</a> · <a href="https://pypi.org/project/opbdh/">PyPI</a> · MIT License</p>
   <p class="sign-off">Unlike HAL, this software is incapable of refusing to open the pod bay door,<br>becoming sentient, or reading lips.</p>
 </footer>
 

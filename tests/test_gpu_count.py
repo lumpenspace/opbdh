@@ -3,7 +3,7 @@
 from opbdh import primeintellect
 from opbdh import runpod as runpod_module
 from opbdh.config import OpbdhConfig
-from opbdh.runpod import make_plan
+from opbdh.runpod import make_plan, plan_summary
 
 
 def _pi_offer(hourly: float = 2.0, memory: int = 80) -> dict:
@@ -34,6 +34,12 @@ def test_plan_estimate_scales_with_gpu_count(tmp_path):
         code_path=code,
     )
     assert double.estimated_hourly_dollars == 2 * single.estimated_hourly_dollars
+    summary = plan_summary(double)
+    assert summary["gpu_count"] == 2
+    assert summary["provider"] == "runpod"
+    assert summary["cloud_type"] == "SECURE"
+    assert summary["network_volume_id"] == "none"
+    assert summary["network_volume_size_gb"] is None
 
 
 def test_plan_cap_applies_to_whole_pod(tmp_path):

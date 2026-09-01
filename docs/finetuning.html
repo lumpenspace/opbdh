@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fine-tuning with OPBDH</title>
+<meta name="description" content="Use OPBDH to author, import, tag, size, and launch LoRA, QLoRA, or Full supervised fine-tunes on one or more GPUs.">
+<link rel="canonical" href="https://opbdh.hyperplex.org/finetuning.html">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://opbdh.hyperplex.org/finetuning.html">
+<meta property="og:site_name" content="OPBDH">
+<meta property="og:title" content="Fine-tuning with OPBDH">
+<meta property="og:description" content="Human-editable datasets, OpenAI and Anthropic imports, tags, named recipes, and automatically sized multi-GPU SFT jobs.">
+<meta property="og:image" content="https://opbdh.hyperplex.org/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A HAL 9000-style red eye above the word OPBDH — Open the Pod Bay Door, Hal.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@lumpenspace">
+<meta name="twitter:creator" content="@lumpenspace">
+<meta name="twitter:title" content="Fine-tuning with OPBDH">
+<meta name="twitter:description" content="Human-editable datasets, named recipes, and automatically sized multi-GPU SFT jobs.">
+<meta name="twitter:image" content="https://opbdh.hyperplex.org/og.png">
+<meta name="twitter:image:alt" content="A HAL 9000-style red eye above the word OPBDH — Open the Pod Bay Door, Hal.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%23111'/%3E%3Ccircle cx='16' cy='16' r='10' fill='%23a00'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%23ff3b00'/%3E%3Ccircle cx='16' cy='16' r='2' fill='%23ffd9a0'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Michroma&amp;family=JetBrains+Mono:wght@400;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #060608;
+    --panel: #0c0c10;
+    --ink: #d4d4da;
+    --dim: #8b8b96;
+    --red: #ff2a1a;
+    --red-deep: #b01000;
+    --amber: #ffb35c;
+    --green: #7ddb8a;
+    --line: #1c1c23;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --display: "Michroma", "Eurostile", sans-serif;
+    --body: "Inter", -apple-system, system-ui, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 15.5px;
+    line-height: 1.7;
+  }
+  ::selection { background: var(--red-deep); color: #fff; }
+  a { color: var(--ink); text-decoration: none; border-bottom: 1px solid var(--line); }
+  a:hover { color: var(--red); border-color: var(--red-deep); }
+
+  .top {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 28px;
+    background: rgba(6, 6, 8, .88);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .top h1 { font-family: var(--display); font-weight: 400; font-size: .95rem; letter-spacing: .22em; color: #f2f2f5; }
+  .top h1 a { border: 0; color: inherit; }
+  .top .sub { font-family: var(--display); font-size: .58rem; letter-spacing: .28em; color: var(--dim); text-transform: uppercase; }
+  .top .resource-nav { margin-left: auto; display: flex; gap: 18px; }
+  .top .resource-nav a { border: 0; font-family: var(--display); font-size: .6rem; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }
+  .top .resource-nav a:hover, .top .resource-nav a[aria-current="page"] { color: var(--red); }
+  .constellation-nav { display: flex; gap: 5px; }
+  .project-square {
+    --square-bg: #fff;
+    --square-ink: #060608;
+    display: grid;
+    place-items: center;
+    width: 29px;
+    height: 29px;
+    border: 0;
+    background: var(--square-bg);
+    color: var(--square-ink);
+    font-family: var(--mono);
+    font-size: .92rem;
+    line-height: 1;
+  }
+  .constellation-nav .project-square {
+    --square-bg: rgba(239, 68, 68, .18);
+    --square-ink: rgba(255, 255, 255, .46);
+    position: relative;
+    border: 1px solid rgba(239, 68, 68, .22);
+    transition: background-color .16s ease, color .16s ease, transform .16s ease, box-shadow .16s ease;
+  }
+  .constellation-nav .project-square:hover,
+  .constellation-nav .project-square:focus-visible {
+    background: #ef4444;
+    color: #fff;
+    border-color: #ff8a80;
+    transform: translateY(-2px);
+    box-shadow: 0 0 14px rgba(239, 68, 68, .58);
+  }
+  .constellation-nav .project-hyperplex:hover { background: #4d7cff; border-color: #91aaff; }
+  .constellation-nav .project-ariadne:hover { background: #fbbf24; color: #060608; border-color: #ffe08a; }
+  .constellation-nav .project-raft:hover { background: #67dfc2; color: #060608; border-color: #b6f3e4; }
+  .project-square:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  .project-opbdh { --square-bg: #ef4444; --square-ink: #fff; flex: none; box-shadow: inset 0 0 0 2px #fff; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 210px minmax(0, 760px);
+    gap: 64px;
+    max-width: 1090px;
+    margin: 0 auto;
+    padding: 44px 28px 120px;
+  }
+  .toc {
+    position: sticky;
+    top: 82px;
+    align-self: start;
+    padding: 26px 20px;
+    background: linear-gradient(163deg, #131318 0%, #060608 28%, #000 62%, #0a0a0e 100%);
+    box-shadow: inset 0 1px 0 rgba(220, 230, 255, .09), 0 34px 70px rgba(0, 0, 0, .7);
+    transform: perspective(1100px) rotateY(5deg);
+  }
+  .toc .eyebrow {
+    margin-bottom: 14px;
+    font-family: var(--display);
+    font-size: .52rem;
+    letter-spacing: .24em;
+    color: var(--red);
+    text-transform: uppercase;
+  }
+  .toc ol { list-style: none; counter-reset: nav; }
+  .toc li { counter-increment: nav; }
+  .toc a { display: flex; gap: 12px; align-items: baseline; padding: 7px 0; border: 0; color: var(--dim); font-size: .82rem; }
+  .toc a::before {
+    content: counter(nav, decimal-leading-zero);
+    font-family: var(--display);
+    font-size: .62rem;
+    color: #3c3c46;
+    transition: color .2s;
+  }
+  .toc a:hover, .toc a.here { color: var(--ink); }
+  .toc a:hover::before, .toc a.here::before { color: var(--red); }
+
+  .docs { min-width: 0; }
+  .docs section { padding-top: 26px; margin-top: 26px; }
+  .docs section + section { border-top: 1px solid var(--line); margin-top: 58px; padding-top: 58px; }
+  .kicker { font-family: var(--display); font-size: .58rem; letter-spacing: .3em; text-transform: uppercase; color: var(--red); }
+  h2 {
+    margin: 10px 0 18px;
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: 1.25rem;
+    letter-spacing: .08em;
+    color: #f2f2f5;
+  }
+  h3 { margin: 30px 0 12px; font-family: var(--display); font-weight: 400; font-size: .8rem; letter-spacing: .14em; color: #fff; }
+  .docs p { margin: 0 0 14px; color: var(--dim); }
+  .docs p strong, .docs li strong { color: var(--ink); font-weight: 600; }
+  .docs ul { margin: 0 0 14px 20px; color: var(--dim); }
+  .docs li { margin-bottom: 8px; }
+  code {
+    padding: 1.5px 6px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: #131318;
+    color: var(--amber);
+    font-family: var(--mono);
+    font-size: .85em;
+  }
+  pre.block {
+    margin: 0 0 14px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #0a0a0e;
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: .8rem;
+    line-height: 1.7;
+  }
+  pre.block code { padding: 0; border: 0; background: none; color: inherit; }
+  pre.block .cm { color: #55555f; }
+  pre.block .kw { color: var(--red); }
+  pre.block .st { color: var(--amber); }
+  .note {
+    margin: 16px 0;
+    padding: 14px 18px;
+    border: 1px solid #2a1512;
+    border-radius: 10px;
+    background: #120c0b;
+    color: var(--dim);
+    font-size: .9rem;
+  }
+  .note::before { content: "◉ "; color: var(--red); }
+  .hero {
+    position: relative;
+    overflow: hidden;
+    padding: 30px 32px 32px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: radial-gradient(circle at 90% 15%, rgba(255, 42, 26, .14), transparent 38%), #0a0a0e;
+  }
+  .hero::after {
+    content: "FT";
+    position: absolute;
+    right: 24px;
+    top: 8px;
+    color: rgba(255, 255, 255, .025);
+    font-family: var(--display);
+    font-size: 7rem;
+    letter-spacing: -.08em;
+    pointer-events: none;
+  }
+  .hero h2 { position: relative; max-width: 620px; margin-bottom: 16px; font-size: 1.45rem; line-height: 1.5; }
+  .hero p { position: relative; max-width: 650px; }
+  .badge-row { position: relative; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+  .badge { padding: 5px 9px; border: 1px solid #292931; border-radius: 999px; color: var(--dim); font-family: var(--mono); font-size: .69rem; }
+  .flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 22px 0 0; }
+  .flow div { position: relative; padding: 14px 10px; border: 1px solid var(--line); border-radius: 8px; background: rgba(6, 6, 8, .72); }
+  .flow b { display: block; margin-bottom: 4px; color: #fff; font-family: var(--display); font-size: .55rem; letter-spacing: .12em; text-transform: uppercase; }
+  .flow span { color: var(--dim); font-size: .76rem; }
+  .flow div:not(:last-child)::after { content: "→"; position: absolute; right: -8px; top: 50%; z-index: 2; color: var(--red); transform: translate(50%, -50%); }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card { padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+  .card h3 { margin-top: 0; }
+  .card pre.block { margin-bottom: 0; padding: 0; border: 0; background: transparent; }
+  table { width: 100%; margin: 0 0 18px; border-collapse: collapse; font-size: .85rem; }
+  th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { color: var(--dim); font-family: var(--display); font-size: .57rem; font-weight: 400; letter-spacing: .16em; text-transform: uppercase; }
+  td { color: var(--dim); }
+  td strong { color: var(--ink); }
+  td code { white-space: nowrap; }
+  .tree { color: var(--dim); }
+  .tree .folder { color: var(--ink); }
+  .next { margin-top: 34px; padding: 20px; border-left: 2px solid var(--red); background: #0a0a0e; }
+  .next p:last-child { margin-bottom: 0; }
+
+  footer {
+    max-width: 1090px;
+    margin: 0 auto;
+    padding: 30px 28px 60px;
+    border-top: 1px solid var(--line);
+    color: var(--dim);
+    font-size: .85rem;
+    text-align: center;
+  }
+  footer .sign-off { margin-top: 10px; color: #55555f; font-family: var(--mono); font-size: .75rem; }
+
+  @media (max-width: 900px) {
+    .layout { display: block; max-width: 760px; }
+    .toc { display: none; }
+    .flow { grid-template-columns: 1fr 1fr; }
+    .flow div:not(:last-child)::after { display: none; }
+  }
+  @media (max-width: 650px) {
+    .top { padding-left: 14px; padding-right: 14px; }
+    .top .sub, .constellation-nav { display: none; }
+    .top .resource-nav { gap: 12px; }
+    .top .resource-nav a:not([aria-current="page"]) { display: none; }
+    .layout { padding: 28px 16px 90px; }
+    .hero { padding: 24px 20px; }
+    .hero::after { font-size: 5rem; }
+    .split, .flow { grid-template-columns: 1fr; }
+    table { display: block; overflow-x: auto; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .constellation-nav .project-square { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <a class="project-square project-opbdh" href="./" aria-label="OPBDH documentation">◉</a>
+  <h1><a href="./">OPBDH</a></h1>
+  <span class="sub">Supervised fine-tuning</span>
+  <nav class="resource-nav" aria-label="Documentation resources">
+    <a href="finetuning.html" aria-current="page">Fine-tuning</a>
+    <a href="./">Main docs</a>
+    <a href="https://github.com/lumpenspace/opbdh">GitHub</a>
+  </nav>
+  <nav class="constellation-nav" aria-label="Other Hyperplex projects">
+    <a class="project-square project-hyperplex" href="https://hyperplex.org" aria-label="Hyperplex" title="Hyperplex"><span aria-hidden="true">⟡</span></a>
+    <a class="project-square project-ariadne" href="https://ariadne.hyperplex.org" aria-label="Ariadne" title="Ariadne"><span aria-hidden="true">⌇</span></a>
+    <a class="project-square project-raft" href="https://github.com/lumpenspace/raft" aria-label="Raft" title="Raft"><span aria-hidden="true">≋</span></a>
+  </nav>
+</header>
+
+<div class="layout">
+  <aside class="toc" aria-label="Fine-tuning contents">
+    <p class="eyebrow">Mission index</p>
+    <ol>
+      <li><a href="#overview">Overview</a></li>
+      <li><a href="#format">TOML format</a></li>
+      <li><a href="#imports">Import data</a></li>
+      <li><a href="#tags">Tags</a></li>
+      <li><a href="#recipes">Recipes</a></li>
+      <li><a href="#launch">Launch</a></li>
+      <li><a href="#multi-gpu">Multi-GPU</a></li>
+      <li><a href="#project-state">Project state</a></li>
+    </ol>
+  </aside>
+
+  <main class="docs">
+    <section id="overview" style="border-top:none; margin-top:0; padding-top:0">
+      <div class="hero">
+        <p class="kicker">Simple SFT</p>
+        <h2>From editable examples to a guarded GPU fine-tune</h2>
+        <p><code>opbdh ft</code> gathers examples, manages tags and training recipes, sizes a pod for the model and technique, then runs the job through OPBDH’s normal confirmation, spend guard, result sync, and cleanup lifecycle.</p>
+        <div class="badge-row" aria-label="Supported fine-tuning capabilities">
+          <span class="badge">base + chat models</span>
+          <span class="badge">LoRA · QLoRA · Full</span>
+          <span class="badge">OpenAI + Anthropic import</span>
+          <span class="badge">1–N GPUs</span>
+        </div>
+        <div class="flow" aria-label="Fine-tuning workflow">
+          <div><b>Gather</b><span>files or interactive examples</span></div>
+          <div><b>Curate</b><span>edit and group with tags</span></div>
+          <div><b>Configure</b><span>choose a named recipe</span></div>
+          <div><b>Inspect</b><span>review sizing and cost</span></div>
+          <div><b>Launch</b><span>sync artifacts home</span></div>
+        </div>
+      </div>
+
+      <h3>Install and start</h3>
+      <pre class="block"><code>pip install <span class="st">"opbdh[ft]"</span>
+opbdh ft</code></pre>
+      <p>The optional extra only adds local TOML-writing support. The generated pod installs the GPU training stack—Transformers, TRL, Accelerate, Datasets, PEFT, and BitsAndBytes when QLoRA needs it.</p>
+      <p>The interactive console can point at existing files or directories, create examples with you, edit tags after loading, select or create a recipe, and preview the launch plan. Use flags instead when you want a repeatable, non-interactive command.</p>
+    </section>
+
+    <section id="format">
+      <p class="kicker">Dataset</p>
+      <h2>Human-editable TOML</h2>
+      <p>Every normalized example has an <code>input</code>, an <code>output</code>, and optional <code>tags</code>. Keep one example per file for easy hand editing, or put many examples in one file.</p>
+
+      <div class="split">
+        <div class="card">
+          <h3>Base model</h3>
+          <pre class="block"><code>input = <span class="st">"Translate hello to Italian"</span>
+output = <span class="st">"Ciao"</span>
+tags = [<span class="st">"translation"</span>, <span class="st">"short"</span>]</code></pre>
+        </div>
+        <div class="card">
+          <h3>Chat model</h3>
+          <pre class="block"><code>output = <span class="st">"Ciao! Come posso aiutarti?"</span>
+tags = [<span class="st">"italian"</span>]
+
+[[input]]
+role = <span class="st">"system"</span>
+content = <span class="st">"Reply in Italian."</span>
+
+[[input]]
+role = <span class="st">"user"</span>
+content = <span class="st">"Hello!"</span></code></pre>
+        </div>
+      </div>
+
+      <h3>Several examples in one file</h3>
+      <pre class="block"><code>[[examples]]
+input = <span class="st">"2 + 2"</span>
+output = <span class="st">"4"</span>
+tags = [<span class="st">"math"</span>]
+
+[[examples]]
+input = <span class="st">"3 + 5"</span>
+output = <span class="st">"8"</span>
+tags = [<span class="st">"math"</span>]</code></pre>
+      <p>For a chat example inside an <code>[[examples]]</code> file, add one <code>[[examples.input]]</code> table per message. Multiline TOML strings work for longer prose.</p>
+      <p>OPBDH also reads a single JSON object, a JSON array, an <code>{ "examples": [...] }</code> wrapper, or JSONL with one object per line. A directory is loaded recursively, so one-file-per-example and many-examples-per-file layouts can coexist.</p>
+
+      <div class="note"><strong>Base versus chat:</strong> a string input trains a plain prompt/completion pair. A message-list input is rendered with the selected tokenizer’s chat template, so you provide roles and content while the model supplies its own control tokens.</div>
+    </section>
+
+    <section id="imports">
+      <p class="kicker">Migration</p>
+      <h2>Import OpenAI or Anthropic data</h2>
+      <p>Convert common provider formats into editable OPBDH TOML without launching a pod:</p>
+      <pre class="block"><code>opbdh ft:import training.jsonl --format openai
+opbdh ft:import anthropic-a.jsonl anthropic-b.jsonl \
+  --format anthropic -o examples.toml
+opbdh ft:import training.jsonl --tag imported --tag support</code></pre>
+      <p><code>--format auto</code> is the default. OpenAI <code>messages</code> rows and prompt/completion rows are supported. Anthropic message content blocks, a separate <code>system</code> field, and legacy <code>Human:</code>/<code>Assistant:</code> prompt/completion rows are normalized.</p>
+      <p>The output extension selects TOML, JSON, or JSONL; without <code>--output</code>, the destination is named after the source with <code>.opbdh.toml</code> appended. Pass files directly to <code>opbdh ft --data ...</code> when you want the console to import them into the managed dataset immediately.</p>
+    </section>
+
+    <section id="tags">
+      <p class="kicker">Curation</p>
+      <h2>Group examples with tags</h2>
+      <p>Tags stay on the examples, not in a separate index, so the dataset remains portable and readable. After loading data, the console can:</p>
+      <ul>
+        <li>bulk add or remove a tag, optionally within an existing group;</li>
+        <li>rename a tag everywhere;</li>
+        <li>edit one example’s tags;</li>
+        <li>clear tags; and</li>
+        <li>choose the groups included in a recipe.</li>
+      </ul>
+      <p>Several selected tags use <strong>match-any</strong> semantics. Selecting no tags trains on every example, including untagged ones. Repeat <code>--tag</code> for the same behavior outside the console:</p>
+      <pre class="block"><code>opbdh ft --recipe support-only --tag support --tag escalation --dry-run</code></pre>
+    </section>
+
+    <section id="recipes">
+      <p class="kicker">Experiments</p>
+      <h2>One dataset, several training recipes</h2>
+      <p>A named recipe stores the training decisions while the examples remain shared. Use separate recipes to compare techniques, parameter sets, tag slices, providers, or GPU counts without duplicating data.</p>
+
+      <table>
+        <thead><tr><th>Technique</th><th>Use it for</th><th>Starting defaults</th></tr></thead>
+        <tbody>
+          <tr><td><strong>LoRA</strong></td><td>Default adapter training with a full-precision base model.</td><td><code>2e-4</code> LR, rank 16, alpha 32, dropout .05</td></tr>
+          <tr><td><strong>QLoRA</strong></td><td>Adapter training with a 4-bit NF4 base-model load and a lower memory floor.</td><td><code>2e-4</code> LR, rank 16, alpha 32, dropout .05</td></tr>
+          <tr><td><strong>Full</strong></td><td>Update every model weight when the model and optimizer state fit.</td><td><code>2e-5</code> LR</td></tr>
+        </tbody>
+      </table>
+
+      <p>All techniques begin at three epochs, a 2,048-token maximum length, batch size 1 per GPU, eight gradient-accumulation steps, packing off, and seed 42. Treat these as useful starting points, not universal optima.</p>
+      <p>The console can switch, create, clone, rename, reset, and delete recipes. A new recipe retains the current model and infrastructure choices but starts from all examples; clone a recipe when you want a controlled variation of every current setting.</p>
+      <pre class="block"><code>opbdh ft --recipe qlora-default --method qlora --dry-run
+opbdh ft --recipe full-2gpu --method full --gpu-count 2 \
+  --learning-rate 1e-5</code></pre>
+    </section>
+
+    <section id="launch">
+      <p class="kicker">Execution</p>
+      <h2>Preview, then launch</h2>
+      <p>The interactive path is simply <code>opbdh ft</code>. A fully specified run can be launched from flags:</p>
+      <pre class="block"><code>opbdh ft \
+  --data ./examples \
+  --model Qwen/Qwen3-8B \
+  --model-type chat \
+  --recipe lora-4gpu \
+  --method lora \
+  --gpu-count 4 \
+  --max-spend 10</code></pre>
+      <p>Use <code>--dry-run</code> to normalize the selected rows, generate and verify the runner, size the pod, and print the plan without renting anything. A real run asks for confirmation unless <code>--yes</code> is present.</p>
+      <p>Core overrides include <code>--epochs</code>, <code>--learning-rate</code>, <code>--max-length</code>, <code>--batch-size</code>, <code>--gradient-accumulation</code>, <code>--lora-r</code>, <code>--lora-alpha</code>, <code>--lora-dropout</code>, <code>--packing</code>, <code>--seed</code>, <code>--vram-gb</code>, <code>--provider</code>, <code>--max-dollars-per-hour</code>, and <code>--max-spend</code>.</p>
+      <div class="note"><strong>Same safety rails:</strong> fine-tunes use OPBDH’s regular provider selection, billable-compute confirmation, spend guard, continuous artifact sync, and pod cleanup.</div>
+    </section>
+
+    <section id="multi-gpu">
+      <p class="kicker">Scale</p>
+      <h2>Multi-GPU pods</h2>
+      <p>Set <code>--gpu-count</code> in a recipe or choose the count in the console. OPBDH requests one pod with that many GPUs, prices the whole pod, and launches TRL through Accelerate.</p>
+      <pre class="block"><code>opbdh ft --recipe lora-4gpu --method lora --gpu-count 4</code></pre>
+      <p>The default strategy is data parallel: each GPU receives a model replica and processes a different slice of the batch. This improves throughput and increases the effective batch size, but <strong>every GPU still needs enough memory for one replica</strong>. Automatic sizing therefore does not divide the model’s memory requirement by the GPU count.</p>
+      <p>The chosen model, technique, maximum sequence length, batch size, and GPU count feed the resource estimate. OPBDH then asks the selected provider for the cheapest available pod that satisfies the resulting VRAM, RAM, disk, price, and count constraints.</p>
+    </section>
+
+    <section id="project-state">
+      <p class="kicker">Persistence</p>
+      <h2>Return to the same project</h2>
+      <p>Fine-tuning state lives beneath the project where it was created. Run <code>opbdh ft</code> from that directory—or one of its children—to reopen the same dataset and recipes.</p>
+      <pre class="block tree"><code><span class="folder">.opbdh/</span>
+├── finetune.json          <span class="cm"># named recipes + dataset metadata</span>
+└── <span class="folder">finetune/</span>
+    ├── data.toml          <span class="cm"># editable normalized examples</span>
+    ├── <span class="folder">jobs/&lt;recipe&gt;/</span>     <span class="cm"># runner + selected rows</span>
+    └── <span class="folder">results/&lt;recipe&gt;/&lt;run-id&gt;/</span>
+                            <span class="cm"># model/adapter, metrics, logs</span></code></pre>
+      <p>Each recipe gets its own generated jobs and result history. Launching another technique against the same data does not overwrite a previous recipe’s artifacts.</p>
+
+      <div class="next">
+        <p class="kicker">Ready</p>
+        <p>Install <code>opbdh[ft]</code>, run <code>opbdh ft</code>, and either point the console at your examples or create the first one there. Start with <code>--dry-run</code> whenever you want to inspect the generated job and pod plan without spending anything.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<footer>
+  <p><a href="./">Main docs</a> · <a href="https://github.com/lumpenspace/opbdh/blob/main/docs/FINETUNING.md">Markdown guide</a> · <a href="https://github.com/lumpenspace/opbdh">GitHub</a> · <a href="https://pypi.org/project/opbdh/">PyPI</a></p>
+  <p class="sign-off">Training program uploaded. Examples selected. Pod bay doors ready.</p>
+</footer>
+
+<script>
+const tocLinks = [...document.querySelectorAll('.toc a')];
+const sections = tocLinks.map(link => document.querySelector(link.hash));
+const spy = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      tocLinks.forEach(link => link.classList.toggle('here', link.hash === '#' + entry.target.id));
+    }
+  });
+}, { rootMargin: '-15% 0px -75% 0px' });
+sections.forEach(section => section && spy.observe(section));
+</script>
+</body>
+</html>

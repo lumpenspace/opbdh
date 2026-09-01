@@ -7,7 +7,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-SKIP_DIRS = {".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".venv", "__pycache__", "node_modules"}
+SKIP_DIRS = {
+    ".git",
+    ".mypy_cache",
+    ".opbdh",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+}
 
 
 @dataclass(slots=True)
