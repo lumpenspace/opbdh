@@ -149,7 +149,6 @@
   .docs { min-width: 0; }
   .docs section { padding-top: 26px; margin-top: 26px; }
   .docs section + section { border-top: 1px solid var(--line); margin-top: 58px; padding-top: 58px; }
-  .kicker { font-family: var(--display); font-size: .58rem; letter-spacing: .3em; text-transform: uppercase; color: var(--red); }
   h2 {
     margin: 10px 0 18px;
     font-family: var(--display);
@@ -282,7 +281,7 @@
   <h1><a href="./">OPBDH</a></h1>
   <span class="sub">Supervised fine-tuning</span>
   <nav class="resource-nav" aria-label="Documentation resources">
-    <a href="finetuning.html" aria-current="page">Fine-tuning</a>
+    <a href="finetuning.html" aria-current="page">OPBDH:FT</a>
     <a href="./">Main docs</a>
     <a href="https://github.com/lumpenspace/opbdh">GitHub</a>
   </nav>
@@ -297,7 +296,7 @@
   <aside class="toc" aria-label="Fine-tuning contents">
     <p class="eyebrow">Mission index</p>
     <ol>
-      <li><a href="#overview">Overview</a></li>
+      <li><a href="#overview">OPBDH:FT</a></li>
       <li><a href="#format">TOML format</a></li>
       <li><a href="#imports">Import data</a></li>
       <li><a href="#tags">Tags</a></li>
@@ -311,8 +310,7 @@
   <main class="docs">
     <section id="overview" style="border-top:none; margin-top:0; padding-top:0">
       <div class="hero">
-        <p class="kicker">Simple SFT</p>
-        <h2>From editable examples to a guarded GPU fine-tune</h2>
+        <h2>OPBDH:FT</h2>
         <p><code>opbdh ft</code> gathers examples, manages tags and training recipes, sizes a pod for the model and technique, then runs the job through OPBDH’s normal confirmation, spend guard, result sync, and cleanup lifecycle.</p>
         <div class="badge-row" aria-label="Supported fine-tuning capabilities">
           <span class="badge">base + chat models</span>
@@ -337,8 +335,7 @@ opbdh ft</code></pre>
     </section>
 
     <section id="format">
-      <p class="kicker">Dataset</p>
-      <h2>Human-editable TOML</h2>
+      <h2>TOML format</h2>
       <p>Every normalized example has an <code>input</code>, an <code>output</code>, and optional <code>tags</code>. Keep one example per file for easy hand editing, or put many examples in one file.</p>
 
       <div class="split">
@@ -380,8 +377,7 @@ tags = [<span class="st">"math"</span>]</code></pre>
     </section>
 
     <section id="imports">
-      <p class="kicker">Migration</p>
-      <h2>Import OpenAI or Anthropic data</h2>
+      <h2>Import data</h2>
       <p>Convert common provider formats into editable OPBDH TOML without launching a pod:</p>
       <pre class="block"><code>opbdh ft:import training.jsonl --format openai
 opbdh ft:import anthropic-a.jsonl anthropic-b.jsonl \
@@ -392,8 +388,7 @@ opbdh ft:import training.jsonl --tag imported --tag support</code></pre>
     </section>
 
     <section id="tags">
-      <p class="kicker">Curation</p>
-      <h2>Group examples with tags</h2>
+      <h2>Tags</h2>
       <p>Tags stay on the examples, not in a separate index, so the dataset remains portable and readable. After loading data, the console can:</p>
       <ul>
         <li>bulk add or remove a tag, optionally within an existing group;</li>
@@ -407,8 +402,7 @@ opbdh ft:import training.jsonl --tag imported --tag support</code></pre>
     </section>
 
     <section id="recipes">
-      <p class="kicker">Experiments</p>
-      <h2>One dataset, several training recipes</h2>
+      <h2>Recipes</h2>
       <p>A named recipe stores the training decisions while the examples remain shared. Use separate recipes to compare techniques, parameter sets, tag slices, providers, or GPU counts without duplicating data.</p>
 
       <table>
@@ -428,8 +422,7 @@ opbdh ft --recipe full-2gpu --method full --gpu-count 2 \
     </section>
 
     <section id="launch">
-      <p class="kicker">Execution</p>
-      <h2>Preview, then launch</h2>
+      <h2>Launch</h2>
       <p>The interactive path is simply <code>opbdh ft</code>. A fully specified run can be launched from flags:</p>
       <pre class="block"><code>opbdh ft \
   --data ./examples \
@@ -445,8 +438,7 @@ opbdh ft --recipe full-2gpu --method full --gpu-count 2 \
     </section>
 
     <section id="multi-gpu">
-      <p class="kicker">Scale</p>
-      <h2>Multi-GPU pods</h2>
+      <h2>Multi-GPU</h2>
       <p>Set <code>--gpu-count</code> in a recipe or choose the count in the console. OPBDH requests one pod with that many GPUs, prices the whole pod, and launches TRL through Accelerate.</p>
       <pre class="block"><code>opbdh ft --recipe lora-4gpu --method lora --gpu-count 4</code></pre>
       <p>The default strategy is data parallel: each GPU receives a model replica and processes a different slice of the batch. This improves throughput and increases the effective batch size, but <strong>every GPU still needs enough memory for one replica</strong>. Automatic sizing therefore does not divide the model’s memory requirement by the GPU count.</p>
@@ -454,8 +446,7 @@ opbdh ft --recipe full-2gpu --method full --gpu-count 2 \
     </section>
 
     <section id="project-state">
-      <p class="kicker">Persistence</p>
-      <h2>Return to the same project</h2>
+      <h2>Project state</h2>
       <p>Fine-tuning state lives beneath the project where it was created. Run <code>opbdh ft</code> from that directory—or one of its children—to reopen the same dataset and recipes.</p>
       <pre class="block tree"><code><span class="folder">.opbdh/</span>
 ├── finetune.json          <span class="cm"># named recipes + dataset metadata</span>
@@ -467,8 +458,7 @@ opbdh ft --recipe full-2gpu --method full --gpu-count 2 \
       <p>Each recipe gets its own generated jobs and result history. Launching another technique against the same data does not overwrite a previous recipe’s artifacts.</p>
 
       <div class="next">
-        <p class="kicker">Ready</p>
-        <p>Install <code>opbdh[ft]</code>, run <code>opbdh ft</code>, and either point the console at your examples or create the first one there. Start with <code>--dry-run</code> whenever you want to inspect the generated job and pod plan without spending anything.</p>
+        <p><strong>Ready.</strong> Install <code>opbdh[ft]</code>, run <code>opbdh ft</code>, and either point the console at your examples or create the first one there. Start with <code>--dry-run</code> whenever you want to inspect the generated job and pod plan without spending anything.</p>
       </div>
     </section>
   </main>

@@ -190,7 +190,6 @@
   .docs { max-width: 660px; }
   .docs section { padding-top: 26px; margin-top: 26px; }
   .docs section + section { border-top: 1px solid var(--line); margin-top: 54px; padding-top: 54px; }
-  .kicker { font-family: var(--display); font-size: .58rem; letter-spacing: .3em; text-transform: uppercase; color: var(--red); }
   h2 {
     font-family: var(--display); font-weight: 400;
     font-size: 1.25rem; letter-spacing: .08em; color: #f2f2f5;
@@ -348,8 +347,9 @@
   @media (max-width: 700px) {
     .top .sub { display: none; }
     .top { padding-right: 14px; padding-left: 14px; }
-    .top .resource-nav { display: none; }
-    .top .constellation-nav { margin-left: auto; }
+    .top .resource-nav a { display: none; }
+    .top .resource-nav a:first-child { display: block; }
+    .top .constellation-nav { display: none; }
   }
 
   @media (max-width: 390px) {
@@ -371,7 +371,7 @@
   <h1>OPBDH</h1>
   <span class="sub">“Of course I can do it, Dave.”</span>
   <nav class="resource-nav" aria-label="Project resources">
-    <a href="finetuning.html">Fine-tuning</a>
+    <a href="finetuning.html">OPBDH:FT</a>
     <a href="https://github.com/lumpenspace/opbdh">GitHub</a>
     <a href="https://pypi.org/project/opbdh/">PyPI</a>
   </nav>
@@ -402,7 +402,6 @@
   <main class="docs">
 
     <section id="what" style="border-top:none; margin-top:0; padding-top:0">
-      <p class="kicker">Overview</p>
       <h2>What it does</h2>
       <p><strong>O</strong>pen the <strong>P</strong>od <strong>B</strong>ay <strong>D</strong>oor, <strong>H</strong>al: launches a <a href="https://www.runpod.io/">RunPod</a> or <a href="https://www.primeintellect.ai">Prime Intellect</a> GPU pod, runs your model-backed script on it, brings your results home, and shuts the pod down.</p>
       <p>For supervised training, <a href="finetuning.html"><code>opbdh ft</code></a> turns human-editable examples into automatically sized LoRA, QLoRA, or Full jobs—including multi-GPU runs—while keeping the same cost and cleanup guarantees.</p>
@@ -419,7 +418,6 @@
     </section>
 
     <section id="install">
-      <p class="kicker">Getting started</p>
       <h2>Install</h2>
       <pre class="block"><code>pip install opbdh</code></pre>
       <p>Requirements: macOS or Linux, Python ≥ 3.11, and <code>ssh</code>/<code>scp</code> on your <code>PATH</code>.</p>
@@ -427,7 +425,6 @@
     </section>
 
     <section id="configure">
-      <p class="kicker">Getting started</p>
       <h2>Configure</h2>
       <p>Running bare <code>opbdh</code> while unconfigured starts a first-run setup wizard: provider, API token check, and defaults for model, code path, VRAM, and price caps.</p>
       <p>Set credentials for your provider:</p>
@@ -444,7 +441,6 @@
     </section>
 
     <section id="run">
-      <p class="kicker">Getting started</p>
       <h2>Run</h2>
       <p>The guided way:</p>
       <pre class="block"><code>opbdh run wizard</code></pre>
@@ -467,8 +463,8 @@ opbdh models size Qwen/Qwen2.5-0.5B-Instruct   <span class="cm"># weight size + 
     </section>
 
     <section id="fine-tuning">
-      <p class="kicker">Training</p>
-      <h2>Supervised fine-tuning</h2>
+      <h2>Fine-tune</h2>
+      <p><a href="finetuning.html"><strong>Open the OPBDH:FT guide →</strong></a></p>
       <p>Install the optional fine-tuning extra and run <code>opbdh ft</code> to open an interactive SFT console:</p>
       <pre class="block"><code>pip install <span class="st">"opbdh[ft]"</span>
 opbdh ft</code></pre>
@@ -481,11 +477,9 @@ tags = [<span class="st">"translation"</span>, <span class="st">"short"</span>]<
   --model-type chat --recipe qlora-2gpu --method qlora --gpu-count 2
 
 opbdh ft:import openai.jsonl --format openai --tag imported</code></pre>
-      <p><a href="finetuning.html"><strong>Read the complete fine-tuning guide →</strong></a></p>
     </section>
 
     <section id="prime-intellect">
-      <p class="kicker">Providers</p>
       <h2>Prime Intellect</h2>
       <p><a href="https://www.primeintellect.ai">Prime Intellect</a> is a marketplace that aggregates GPU offers from many clouds (Hyperstack, Lambda, Nebius, even RunPod itself). Pass <code>--provider primeintellect</code> to any of <code>plan</code>, <code>run now</code>, <code>launch</code>, or <code>gpus</code> — or set <code>"provider": "primeintellect"</code> in your config — and OPBDH will:</p>
       <ul>
@@ -505,8 +499,7 @@ opbdh launch ./run.py --model Org/Model --provider primeintellect \
     </section>
 
     <section id="volumes">
-      <p class="kicker">Persistence</p>
-      <h2>Model cache and network volumes</h2>
+      <h2>Model cache &amp; volumes</h2>
       <p>By default the Hugging Face cache lives on the pod's own disk, which is deleted with the pod — so every run re-downloads the model. For anything bigger than a toy model, attach a RunPod <strong>network volume</strong>: the cache then lives at a persistent <code>/workspace</code> mount that survives across runs, and subsequent launches skip the download entirely.</p>
       <p>Two ways to get one:</p>
       <ul>
@@ -519,7 +512,6 @@ opbdh launch ./run.py --model Org/Model --provider primeintellect \
     </section>
 
     <section id="environment">
-      <p class="kicker">On the pod</p>
       <h2>Your script's environment</h2>
       <p>On the pod, your code runs from <code>/opbdh-run/user/</code> with:</p>
       <table>
@@ -537,7 +529,6 @@ opbdh launch ./run.py --model Org/Model --provider primeintellect \
     </section>
 
     <section id="safety">
-      <p class="kicker">Guarantees</p>
       <h2>Safety rails</h2>
       <ul>
         <li><strong>Confirmation gate</strong>: real launches require an explicit yes (or <code>--yes</code>).</li>
@@ -547,7 +538,6 @@ opbdh launch ./run.py --model Org/Model --provider primeintellect \
     </section>
 
     <section id="development">
-      <p class="kicker">Contributing</p>
       <h2>Development</h2>
       <pre class="block"><code>pip install -e ".[dev]"
 ruff check .
