@@ -10,6 +10,7 @@ Library use:
 See :func:`opbdh.launch`, :func:`opbdh.plan`, and :mod:`opbdh.api`.
 """
 
+from .execution import ExecutionTarget, launch_local, local_accelerators, plan_execution, require_local_capacity
 from .api import (
     GOALS,
     InsufficientCreditsError,
@@ -38,6 +39,11 @@ __all__ = [
     "__version__",
     # Running
     "launch",
+    "launch_local",
+    "plan_execution",
+    "local_accelerators",
+    "require_local_capacity",
+    "ExecutionTarget",
     "plan",
     "summarize",
     "configure",
@@ -63,4 +69,4 @@ __all__ = [
     "event_messages",
 ]
 
-__version__ = "1.7.0"
+__version__ = "1.8.0"
