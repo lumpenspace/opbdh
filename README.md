@@ -146,3 +146,16 @@ pytest
 ```
 
 See [RELEASING.md](RELEASING.md) for releases. [MIT](LICENSE) — unlike HAL, this software is incapable of refusing to open the pod bay door, becoming sentient, or reading lips.
+
+### Local accelerator workloads
+
+Clients can share opbdh's placement checks for RunPod, Apple Silicon and local CUDA:
+
+```python
+from opbdh import plan_execution, require_local_capacity, launch_local
+plan = plan_execution('runpod', required_gb=80)  # default cloud placement
+require_local_capacity('mps', required_gb=80)   # raises if insufficient
+launch_local(['python', 'job.py'], target='cuda', required_gb=80)
+```
+
+The CUDA check uses free memory on device 0, not the sum across GPUs. The Apple check uses PyTorch's recommended available MPS working set. Local launches use an explicit argument list without a shell and set `OPBDH_DEVICE`; the workload must honor that device. Cloud workloads continue to use `opbdh.launch` with the normal spend guard.
