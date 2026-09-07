@@ -107,6 +107,8 @@ always cleans up its pod. Full reference in [docs/API.md](docs/API.md).
 - 🧪 **Nothing launches unverified** — static checks and a `--dry-run` mode
 - 🧙 **Wizards or flags** — first-run setup, `opbdh config wizard`, `opbdh run wizard`; or plain flags (each with a one-letter short form) and layered JSON config
 - ☁️ **Two providers** — RunPod (default) or Prime Intellect's multi-cloud marketplace via `--provider primeintellect`
+- 🤗 **Direct Hugging Face Hub upload** — `--push-to-hub <repo>` pushes outputs directly from the pod upon completion
+- 🚨 **Failure resilience & alerts** — if your script errors out, the pod is preserved for SSH debugging and a loud notification sounds for 25% of run duration
 - 👁️ **HAL watches your money** — a pulsing red eye with elapsed time and estimated spend (TTY only; `OPBDH_NO_HAL=1` to silence)
 
 ## Options
@@ -122,6 +124,9 @@ Flags override a local `opbdh.json`/`.opbdh.json`, which overrides `~/.config/op
 | `--gpu-count, -g` | GPUs in the pod; whole-pod pricing and spend caps scale with it |
 | `--max-dollars-per-hour, -d` | Cap on the estimated hourly price |
 | `--max-spend, -s` | Spend guard: stop the run past this estimated total |
+| `--push-to-hub, --hf-repo` | Upload `results/` directly to Hugging Face Hub upon completion (e.g. `user/my-model`) |
+| `--push-to-hub-private` | Whether uploaded Hugging Face repository is private (default: private) |
+| `--keep-pod-on-failure` | Keep pod running for debugging if script fails (default: true) |
 | `--network-volume-id, -V` | Attach an existing RunPod network volume |
 | `--auto-network-volume, -a` | Create/reuse a volume named `opbdh-{model_slug}`, sized from the weights |
 | `--network-volume-data-center-id, -D` | Data center for auto-created volumes, e.g. `EU-RO-1` |
@@ -131,11 +136,11 @@ Flags override a local `opbdh.json`/`.opbdh.json`, which overrides `~/.config/op
 | `--dry-run, -n` | Verify and print the plan; never contacts the provider |
 | `--yes, -y` | Skip the billable-compute confirmation |
 
-Config-only keys, one each: `image` (Docker tag, or Prime Intellect environment name), `cloud_type` (`SECURE`/`COMMUNITY`/`ALL`), `container_disk_gb`, `pod_volume_gb`, `network_volume_name`, `network_volume_size_gb`, `pre_download_model` (default on), `results_dir`, `poll_seconds`, `failure_keepalive_seconds` (debug window on failure, default 120 s), `keep_pod_on_success`, `ssh_key`/`ssh_public_key`.
+Config-only keys, one each: `image` (Docker tag, or Prime Intellect environment name), `cloud_type` (`SECURE`/`COMMUNITY`/`ALL`), `container_disk_gb`, `pod_volume_gb`, `network_volume_name`, `network_volume_size_gb`, `pre_download_model` (default on), `results_dir`, `poll_seconds`, `push_to_hub`, `push_to_hub_private`, `keep_pod_on_failure` (default true), `failure_keepalive_seconds`, `keep_pod_on_success`, `ssh_key`/`ssh_public_key`.
 
 Other commands, one each: `opbdh ft` (interactive or flag-driven supervised fine-tuning), `opbdh ft:import` (normalize OpenAI/Anthropic data), `opbdh plan` (show the plan for a run), `opbdh verify` (static checks only), `opbdh gpus` (GPU candidates and prices), `opbdh models search`/`size` (find models, weight size + suggested volume), `opbdh config show`/`write`/`wizard`.
 
-On the pod, your script runs with `OPBDH_MODEL_ID`, `OPBDH_RESULTS_DIR`, and the HF cache variables set; a sibling `requirements.txt` is pip-installed; write to `logs/` and `results/` and they come home. Network volumes are never deleted by OPBDH and bill by the GB-month — clean them up in the RunPod console.
+On the pod, your script runs with `OPBDH_MODEL_ID`, `OPBDH_RESULTS_DIR`, `OPBDH_PUSH_TO_HUB`, and the HF cache variables set; a sibling `requirements.txt` is pip-installed; write to `logs/` and `results/` and they come home. Network volumes are never deleted by OPBDH and bill by the GB-month — clean them up in the RunPod console.
 
 ## Development
 

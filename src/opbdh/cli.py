@@ -182,6 +182,9 @@ def _load_run_config(
     min_ram_per_gpu: int | None = None,
     provider: str | None = None,
     gpu_count: int | None = None,
+    push_to_hub: str | None = None,
+    push_to_hub_private: bool | None = None,
+    keep_pod_on_failure: bool | None = None,
 ) -> OpbdhConfig:
     return load_config(
         local_config=config_file,
@@ -199,6 +202,9 @@ def _load_run_config(
             network_volume_data_center_id=network_volume_data_center_id,
             min_vcpu_per_gpu=min_vcpu_per_gpu,
             min_ram_per_gpu_gb=min_ram_per_gpu,
+            push_to_hub=push_to_hub,
+            push_to_hub_private=push_to_hub_private,
+            keep_pod_on_failure=keep_pod_on_failure,
         ),
     )
 
@@ -522,6 +528,9 @@ def run_now(
     ),
     min_vcpu_per_gpu: int | None = typer.Option(None, "--min-vcpu-per-gpu", "-u", help="Minimum host vCPUs per GPU."),
     min_ram_per_gpu: int | None = typer.Option(None, "--min-ram-per-gpu", "-r", help="Minimum host RAM per GPU, in GB."),
+    push_to_hub: str | None = typer.Option(None, "--push-to-hub", "--hf-repo", help="Hugging Face repo to upload results to directly from the pod upon completion (e.g. user/my-model)."),
+    push_to_hub_private: bool | None = typer.Option(None, "--push-to-hub-private/--push-to-hub-public", help="Whether uploaded Hugging Face repo is private."),
+    keep_pod_on_failure: bool | None = typer.Option(None, "--keep-pod-on-failure/--no-keep-pod-on-failure", help="Keep pod alive if remote script fails."),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Verify and print the plan without contacting RunPod."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip billable-compute confirmation."),
 ) -> None:
@@ -540,6 +549,9 @@ def run_now(
         min_vcpu_per_gpu=min_vcpu_per_gpu,
         min_ram_per_gpu=min_ram_per_gpu,
         provider=provider,
+        push_to_hub=push_to_hub,
+        push_to_hub_private=push_to_hub_private,
+        keep_pod_on_failure=keep_pod_on_failure,
     )
     _execute_run(cfg, dry_run=dry_run, yes=yes)
 
@@ -560,6 +572,9 @@ def launch(
     network_volume_data_center_id: str | None = typer.Option(None, "--network-volume-data-center-id", "-D"),
     min_vcpu_per_gpu: int | None = typer.Option(None, "--min-vcpu-per-gpu", "-u", help="Minimum host vCPUs per GPU."),
     min_ram_per_gpu: int | None = typer.Option(None, "--min-ram-per-gpu", "-r", help="Minimum host RAM per GPU, in GB."),
+    push_to_hub: str | None = typer.Option(None, "--push-to-hub", "--hf-repo", help="Hugging Face repo to upload results to directly from the pod upon completion (e.g. user/my-model)."),
+    push_to_hub_private: bool | None = typer.Option(None, "--push-to-hub-private/--push-to-hub-public", help="Whether uploaded Hugging Face repo is private."),
+    keep_pod_on_failure: bool | None = typer.Option(None, "--keep-pod-on-failure/--no-keep-pod-on-failure", help="Keep pod alive if remote script fails."),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Verify and print the plan without contacting RunPod."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip billable-compute confirmation."),
 ) -> None:
@@ -579,6 +594,9 @@ def launch(
         min_vcpu_per_gpu=min_vcpu_per_gpu,
         min_ram_per_gpu=min_ram_per_gpu,
         provider=provider,
+        push_to_hub=push_to_hub,
+        push_to_hub_private=push_to_hub_private,
+        keep_pod_on_failure=keep_pod_on_failure,
     )
     _execute_run(cfg, dry_run=dry_run, yes=yes)
 

@@ -155,6 +155,24 @@ def main() -> None:
             encoding="utf-8",
         )
 
+        push_repo = config.get("push_to_hub") or os.environ.get("OPBDH_PUSH_TO_HUB")
+        if push_repo:
+            try:
+                from huggingface_hub import HfApi
+                api = HfApi()
+                private = config.get("push_to_hub_private", True)
+                if isinstance(private, str):
+                    private = private.lower() in ("1", "true", "yes")
+                api.create_repo(push_repo, private=private, exist_ok=True)
+                api.upload_folder(
+                    folder_path=str(model_dir),
+                    repo_id=push_repo,
+                    repo_type="model",
+                )
+                print(f"Uploaded fine-tuned model to Hugging Face Hub: {push_repo}")
+            except Exception as upload_exc:
+                print(f"Warning: Failed to upload to Hugging Face Hub: {upload_exc}")
+
 
 if __name__ == "__main__":
     main()

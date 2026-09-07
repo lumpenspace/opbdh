@@ -50,6 +50,9 @@ class OpbdhConfig:
     poll_seconds: int = 20
     failure_keepalive_seconds: int = 120
     keep_pod_on_success: bool = False
+    keep_pod_on_failure: bool = True
+    push_to_hub: str = ""
+    push_to_hub_private: bool = True
     # Empty means auto: discover a standard ~/.ssh key, or generate a dedicated
     # opbdh keypair under the config dir when none exists.
     ssh_key: str = ""

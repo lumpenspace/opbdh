@@ -17,13 +17,14 @@ print(result.outputs_dir)   # runpod_results/<run_id>/results
 Configuration layers exactly as it does for the CLI: keyword overrides beat a
 local `opbdh.json`, which beats `~/.config/opbdh/config.json`. Any
 `OpbdhConfig` field can be passed as a keyword, plus the CLI-style aliases
-`model` (→ `model_id`), `max_spend` (→ `max_spend_dollars`), and
-`min_ram_per_gpu` (→ `min_ram_per_gpu_gb`).
+`model` (→ `model_id`), `max_spend` (→ `max_spend_dollars`),
+`min_ram_per_gpu` (→ `min_ram_per_gpu_gb`), and `push_to_hub` (→ Hugging Face repo ID).
 
 **These functions never prompt.** `launch()` does not ask for confirmation
-before spending money, and a failed run always deletes its pod instead of
-asking whether to keep it alive for debugging. Treat calling `launch()` as
-having already said yes.
+before spending money. When `keep_pod_on_failure` is True (the default), a failed
+script preserves the pod for SSH debugging and triggers a notification alert;
+set `keep_pod_on_failure=False` for immediate deletion on failure. Treat calling
+`launch()` as having already said yes.
 
 ## `launch(code, **overrides)`
 

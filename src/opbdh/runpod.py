@@ -234,6 +234,35 @@ PY
 echo "model cache ready" > logs/model_downloaded
 """.strip()
 
+    upload_block = ""
+    if config.push_to_hub:
+        upload_block = f"""
+echo "uploading results to hugging face hub: {config.push_to_hub}" > logs/hf_upload_started
+python3 - <<'PY'
+import os
+from pathlib import Path
+from huggingface_hub import HfApi
+
+repo_id = {config.push_to_hub!r}
+private = {bool(config.push_to_hub_private)!r}
+results_path = Path({RUN_ROOT!r}) / "results"
+
+if results_path.exists() and any(results_path.iterdir()):
+    print(f"Uploading {{results_path}} to Hugging Face Hub ({{repo_id}})...")
+    api = HfApi()
+    api.create_repo(repo_id, private=private, exist_ok=True)
+    api.upload_folder(
+        folder_path=str(results_path),
+        repo_id=repo_id,
+        repo_type="model",
+    )
+    print(f"Direct Hugging Face Hub upload complete: {{repo_id}}")
+else:
+    print(f"Notice: Results directory {{results_path}} is empty, skipping upload to {{repo_id}}")
+PY
+echo "hugging face upload complete" > logs/hf_upload_completed
+""".strip()
+
     return f"""#!/usr/bin/env bash
 set -Eeuo pipefail
 cd {RUN_ROOT}
@@ -259,11 +288,14 @@ export XDG_CACHE_HOME={shlex.quote(str(Path(cache_root) / "xdg"))}
 export PIP_CACHE_DIR={shlex.quote(str(Path(cache_root) / "pip"))}
 export OPBDH_MODEL_ID={shlex.quote(config.model_id)}
 export OPBDH_RESULTS_DIR={RUN_ROOT}/results
+export OPBDH_PUSH_TO_HUB={shlex.quote(config.push_to_hub)}
+export OPBDH_PUSH_TO_HUB_PRIVATE={shlex.quote("1" if config.push_to_hub_private else "0")}
 export PYTHONUNBUFFERED=1
 {download_block}
 echo "running user command" > logs/user_command_started
 {command}
 echo "user command complete" > logs/user_command_completed
+{upload_block}
 """.strip() + "\n"
 
 
@@ -509,6 +541,19 @@ def _stop_remote_job(ssh_target: RunpodSshTarget, key_path: Path) -> None:
     )
 
 
+def _extract_tar_archive_safely(archive: tarfile.TarFile, destination: Path) -> None:
+    for filter_mode in ("tar", "fully_trusted"):
+        try:
+            archive.extractall(destination, filter=filter_mode)
+            return
+        except TypeError:
+            # Python < 3.12 without filter argument
+            break
+        except Exception:
+            continue
+    archive.extractall(destination)
+
+
 def sync_results_from_pod(ssh_target: RunpodSshTarget, key_path: Path, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     completed = subprocess.run(
@@ -521,10 +566,7 @@ def sync_results_from_pod(ssh_target: RunpodSshTarget, key_path: Path, destinati
     if not completed.stdout:
         return
     with tarfile.open(fileobj=io.BytesIO(completed.stdout), mode="r:gz") as archive:
-        try:
-            archive.extractall(destination, filter="data")
-        except TypeError:
-            archive.extractall(destination)
+        _extract_tar_archive_safely(archive, destination)
 
 
 def _timed_yes_no(prompt: str, *, timeout_seconds: int, default: bool = False) -> bool:
@@ -541,6 +583,91 @@ def _timed_yes_no(prompt: str, *, timeout_seconds: int, default: bool = False) -
     if not answer:
         return default
     return answer in {"y", "yes"}
+
+
+def _trigger_system_alert(title: str, message: str) -> None:
+    try:
+        sys.stdout.write("\a")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+    if sys.platform == "darwin":
+        try:
+            subprocess.run(
+                [
+                    "osascript",
+                    "-e",
+                    f'display notification "{message}" with title "{title}" sound name "Glass"',
+                ],
+                capture_output=True,
+                timeout=3,
+            )
+        except Exception:
+            pass
+        try:
+            subprocess.Popen(
+                ["afplay", "/System/Library/Sounds/Ping.aiff"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+    elif sys.platform.startswith("linux"):
+        try:
+            subprocess.run(
+                ["notify-send", title, message],
+                capture_output=True,
+                timeout=3,
+            )
+        except Exception:
+            pass
+
+
+def _send_failure_alert(
+    *,
+    provider: str,
+    pod_id: str,
+    ssh_target: RunpodSshTarget,
+    key_path: Path,
+    run_duration: float,
+    alert_duration: float,
+    interactive: bool,
+) -> None:
+    from rich.console import Console
+
+    console = Console()
+    dur_mins = int(run_duration // 60)
+    dur_secs = int(run_duration % 60)
+    alert_mins = int(alert_duration // 60)
+    alert_secs = int(alert_duration % 60)
+    ssh_cmd = f"ssh -p {ssh_target.port} -i {key_path} root@{ssh_target.host}"
+
+    console.print(
+        f"\n[bold white on red] 🚨 ALERT: REMOTE SCRIPT FAILED! POD KEPT ALIVE FOR DEBUGGING 🚨 [/]\n"
+        f"[bold red]Provider:[/] {provider} | [bold red]Pod ID:[/] {pod_id}\n"
+        f"[bold yellow]Run took:[/] {dur_mins}m {dur_secs}s | [bold yellow]Alert duration:[/] {alert_mins}m {alert_secs}s (25% of run duration)\n"
+        f"[bold green]SSH to debug:[/] [bold underline]{ssh_cmd}[/]\n"
+        f"[dim]The pod will remain running. Press Enter or Ctrl+C to silence the alert...[/]\n"
+    )
+
+    _trigger_system_alert("OPBDH: Run Failed!", f"Pod {pod_id} kept alive. SSH: {ssh_target.label()}")
+    end_time = time.time() + alert_duration
+    try:
+        while time.time() < end_time:
+            remaining = int(end_time - time.time())
+            if interactive and sys.stdin.isatty():
+                readable, _, _ = select.select([sys.stdin], [], [], min(5.0, max(0.1, remaining)))
+                if readable:
+                    sys.stdin.readline()
+                    console.print("[dim]Alert silenced by user. Pod remains running for debugging.[/]")
+                    break
+            else:
+                time.sleep(min(5.0, max(0.1, remaining)))
+            if time.time() < end_time:
+                _trigger_system_alert("OPBDH: Run Failed!", f"Pod {pod_id} still alive for debugging.")
+    except (KeyboardInterrupt, Exception):
+        console.print("\n[dim]Alert silenced. Pod remains running for debugging.[/]")
 
 
 def _append_local_log(path: Path, message: str) -> None:
@@ -806,15 +933,42 @@ def run_plan(
                 except Exception:
                     pass
 
-            # Library callers get deterministic cleanup instead of a prompt.
-            keep = interactive and _timed_yes_no(
-                f"\nRun failed. Keep {provider} pod {pod_id} running for debugging?",
-                timeout_seconds=max(1, int(plan.config.failure_keepalive_seconds)),
-                default=False,
-            )
-            delete_pod = not keep
-            if keep:
-                _append_local_log(local_log, f"Keeping failed pod {pod_id} running by user request.")
+                if plan.config.keep_pod_on_failure:
+                    delete_pod = False
+                    _append_local_log(
+                        local_log,
+                        f"Remote script failed. Keeping {provider} pod {pod_id} running for debugging at {ssh_target.label()}.",
+                    )
+                    run_duration = max(0.0, time.time() - start)
+                    alert_duration = run_duration * 0.25
+                    if alert_duration > 0:
+                        _send_failure_alert(
+                            provider=provider,
+                            pod_id=pod_id,
+                            ssh_target=ssh_target,
+                            key_path=private_key,
+                            run_duration=run_duration,
+                            alert_duration=alert_duration,
+                            interactive=interactive,
+                        )
+                else:
+                    keep = interactive and _timed_yes_no(
+                        f"\nRun failed. Keep {provider} pod {pod_id} running for debugging?",
+                        timeout_seconds=max(1, int(plan.config.failure_keepalive_seconds)),
+                        default=False,
+                    )
+                    delete_pod = not keep
+                    if keep:
+                        _append_local_log(local_log, f"Keeping failed pod {pod_id} running by user request.")
+            else:
+                keep = interactive and _timed_yes_no(
+                    f"\nRun failed. Keep {provider} pod {pod_id} running for debugging?",
+                    timeout_seconds=max(1, int(plan.config.failure_keepalive_seconds)),
+                    default=False,
+                )
+                delete_pod = not keep
+                if keep:
+                    _append_local_log(local_log, f"Keeping failed pod {pod_id} running by user request.")
         raise
     finally:
         if pod_id and delete_pod:
@@ -827,6 +981,8 @@ def run_plan(
                 _append_local_log(local_log, f"{provider} pod {pod_id} deleted.")
             except Exception as exc:
                 _append_local_log(local_log, f"Pod deletion failed: {exc}")
+        elif pod_id and not delete_pod:
+            _append_local_log(local_log, f"{provider} pod {pod_id} preserved (not deleted).")
         if provider == "runpod" and pod_id and reporter is not None:
             balance = _runpod_balance_or_none()
             if balance is not None:
@@ -854,6 +1010,7 @@ def plan_summary(plan: OpbdhPlan) -> dict[str, Any]:
         "network_volume_id": plan.network_volume_id or "none",
         "network_volume_size_gb": plan.network_volume_size_gb if uses_network_volume else None,
         "results_dir": str(plan.results_dir),
+        "push_to_hub": plan.config.push_to_hub or "none",
         "verified_files": [str(path) for path in plan.verification_checked],
     }
     if provider == "runpod":
