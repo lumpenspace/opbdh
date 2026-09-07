@@ -53,6 +53,12 @@ class OpbdhConfig:
     keep_pod_on_failure: bool = True
     push_to_hub: str = ""
     push_to_hub_private: bool = True
+    serve_accelerator: str = "gpu"
+    serve_instance_type: str = "nvidia-a10g"
+    serve_instance_size: str = "x1"
+    serve_vendor: str = "aws"
+    serve_region: str = "us-east-1"
+    serve_scale_to_zero: int = 15
     # Empty means auto: discover a standard ~/.ssh key, or generate a dedicated
     # opbdh keypair under the config dir when none exists.
     ssh_key: str = ""

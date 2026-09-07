@@ -140,3 +140,43 @@ and run with:
 - `OPBDH_MODEL_ID` — the model id
 - `OPBDH_RESULTS_DIR` — write outputs here to have them synced home
 - Hugging Face cache variables, plus `HF_TOKEN` when set locally
+
+## Cloud Serving (Hugging Face Inference Endpoints)
+
+```python
+from opbdh import (
+    create_endpoint,
+    list_endpoints,
+    get_endpoint,
+    pause_endpoint,
+    resume_endpoint,
+    delete_endpoint,
+    test_inference,
+)
+
+# 1. Create and deploy an inference endpoint with automatic 15m scale-to-zero
+summary = create_endpoint(
+    "lumpenspace/reword-grpo-scaled",
+    name="reword-ep",
+    accelerator="gpu",
+    instance_type="nvidia-a10g",
+    scale_to_zero_timeout=15,
+)
+print(summary.name, summary.url, summary.status)
+
+# 2. List all endpoints
+for ep in list_endpoints():
+    print(ep.name, ep.repository, ep.status, ep.url)
+
+# 3. Test inference directly
+response = test_inference("reword-ep", prompt="Write an opening paragraph.", max_new_tokens=256)
+print(response)
+
+# 4. Pause and resume to control spend
+pause_endpoint("reword-ep")
+resume_endpoint("reword-ep")
+
+# 5. Clean teardown
+delete_endpoint("reword-ep")
+```
+

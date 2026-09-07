@@ -33,6 +33,17 @@ from .api import (
     suggest_volume_gb,
     summarize,
     verify,
+    EndpointSummary,
+    InferenceEndpointNotFoundError,
+    InferencePermissionError,
+    create_endpoint,
+    delete_endpoint,
+    get_endpoint,
+    list_endpoints,
+    normalize_endpoint_name,
+    pause_endpoint,
+    resume_endpoint,
+    test_inference,
 )
 
 __all__ = [
@@ -67,6 +78,18 @@ __all__ = [
     # Event helpers
     "collect_events",
     "event_messages",
+    # Serving
+    "EndpointSummary",
+    "InferenceEndpointNotFoundError",
+    "InferencePermissionError",
+    "create_endpoint",
+    "delete_endpoint",
+    "get_endpoint",
+    "list_endpoints",
+    "normalize_endpoint_name",
+    "pause_endpoint",
+    "resume_endpoint",
+    "test_inference",
 ]
 
-__version__ = "1.9.0"
+__version__ = "1.10.0"

@@ -45,6 +45,19 @@ from .runpod import (
     plan_summary,
     run_plan,
 )
+from .serve import (
+    EndpointSummary,
+    InferenceEndpointNotFoundError,
+    InferencePermissionError,
+    create_endpoint,
+    delete_endpoint,
+    get_endpoint,
+    list_endpoints,
+    normalize_endpoint_name,
+    pause_endpoint,
+    resume_endpoint,
+    test_inference,
+)
 from .verify import VerificationResult, verify_code
 
 __all__ = [
@@ -56,6 +69,17 @@ __all__ = [
     "OpbdhRunResult",
     "RunEvent",
     "RunpodBalance",
+    "EndpointSummary",
+    "InferencePermissionError",
+    "InferenceEndpointNotFoundError",
+    "create_endpoint",
+    "list_endpoints",
+    "get_endpoint",
+    "pause_endpoint",
+    "resume_endpoint",
+    "delete_endpoint",
+    "test_inference",
+    "normalize_endpoint_name",
     "collect_events",
     "configure",
     "estimate_memory",

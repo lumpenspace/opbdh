@@ -108,6 +108,7 @@ always cleans up its pod. Full reference in [docs/API.md](docs/API.md).
 - 🧙 **Wizards or flags** — first-run setup, `opbdh config wizard`, `opbdh run wizard`; or plain flags (each with a one-letter short form) and layered JSON config
 - ☁️ **Two providers** — RunPod (default) or Prime Intellect's multi-cloud marketplace via `--provider primeintellect`
 - 🤗 **Direct Hugging Face Hub upload** — `--push-to-hub <repo>` pushes outputs directly from the pod upon completion
+- ⚡ **Cloud model serving via Hugging Face** — deploy, pause, resume, and query dedicated Inference Endpoints with automatic scale-to-zero via `opbdh serve`
 - 🚨 **Failure resilience & alerts** — if your script errors out, the pod is preserved for SSH debugging and a loud notification sounds for 25% of run duration
 - 👁️ **HAL watches your money** — a pulsing red eye with elapsed time and estimated spend (TTY only; `OPBDH_NO_HAL=1` to silence)
 
@@ -138,9 +139,31 @@ Flags override a local `opbdh.json`/`.opbdh.json`, which overrides `~/.config/op
 
 Config-only keys, one each: `image` (Docker tag, or Prime Intellect environment name), `cloud_type` (`SECURE`/`COMMUNITY`/`ALL`), `container_disk_gb`, `pod_volume_gb`, `network_volume_name`, `network_volume_size_gb`, `pre_download_model` (default on), `results_dir`, `poll_seconds`, `push_to_hub`, `push_to_hub_private`, `keep_pod_on_failure` (default true), `failure_keepalive_seconds`, `keep_pod_on_success`, `ssh_key`/`ssh_public_key`.
 
-Other commands, one each: `opbdh ft` (interactive or flag-driven supervised fine-tuning), `opbdh ft:import` (normalize OpenAI/Anthropic data), `opbdh plan` (show the plan for a run), `opbdh verify` (static checks only), `opbdh gpus` (GPU candidates and prices), `opbdh models search`/`size` (find models, weight size + suggested volume), `opbdh config show`/`write`/`wizard`.
+Other commands, one each: `opbdh serve` (deploy, list, query, and manage Hugging Face Inference Endpoints), `opbdh ft` (interactive or flag-driven supervised fine-tuning), `opbdh ft:import` (normalize OpenAI/Anthropic data), `opbdh plan` (show the plan for a run), `opbdh verify` (static checks only), `opbdh gpus` (GPU candidates and prices), `opbdh models search`/`size` (find models, weight size + suggested volume), `opbdh config show`/`write`/`wizard`.
 
 On the pod, your script runs with `OPBDH_MODEL_ID`, `OPBDH_RESULTS_DIR`, `OPBDH_PUSH_TO_HUB`, and the HF cache variables set; a sibling `requirements.txt` is pip-installed; write to `logs/` and `results/` and they come home. Network volumes are never deleted by OPBDH and bill by the GB-month — clean them up in the RunPod console.
+
+## Cloud Serving (Hugging Face Inference Endpoints)
+
+Deploy fine-tuned or catalog models directly to dedicated cloud endpoints powered by Hugging Face:
+
+```bash
+# Deploy a model (defaults to GPU, nvidia-a10g, with 15m scale-to-zero)
+opbdh serve create lumpenspace/reword-grpo-scaled
+
+# List active and paused endpoints
+opbdh serve list
+
+# Query / test your endpoint directly from the CLI
+opbdh serve test reword-grpo-scaled-ep --prompt "Write a critique of contemporary academia."
+
+# Pause endpoint to halt billing (or resume when needed)
+opbdh serve pause reword-grpo-scaled-ep
+opbdh serve resume reword-grpo-scaled-ep
+
+# Clean teardown
+opbdh serve delete reword-grpo-scaled-ep
+```
 
 ## Development
 

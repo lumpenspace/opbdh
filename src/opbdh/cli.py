@@ -49,10 +49,23 @@ from .finetune import (
     write_examples,
 )
 from .gpu import candidate_gpus
-from .hal import QUOTE_OVERSPEND, QUOTE_REFUSAL, QUOTE_SUCCESS, hal_says
+from .hal import QUOTE_OVERSPEND, QUOTE_REFUSAL, QUOTE_SUCCESS, HalEye, hal_says
 from .hf import estimate_model_size_gb, suggested_network_volume_gb
 from .remote import InsufficientCreditsError
 from .runpod import MaxSpendReached, RunEvent, make_plan, plan_summary, run_plan
+from .serve import (
+    EndpointSummary,
+    InferenceEndpointNotFoundError,
+    InferencePermissionError,
+    create_endpoint,
+    delete_endpoint,
+    get_endpoint,
+    list_endpoints,
+    normalize_endpoint_name,
+    pause_endpoint,
+    resume_endpoint,
+    test_inference,
+)
 from .verify import verify_code
 
 
@@ -60,9 +73,11 @@ app = typer.Typer(help="OPBDH: Open the Pod Bay Door, Hal. Run model scripts on 
 run_app = typer.Typer(help="Plan, launch, or interactively build a RunPod run.")
 config_app = typer.Typer(help="Inspect and build OPBDH config.")
 models_app = typer.Typer(help="Hugging Face model helpers.")
+serve_app = typer.Typer(help="Serve models for cloud inference via Hugging Face Inference Endpoints.")
 app.add_typer(run_app, name="run")
 app.add_typer(config_app, name="config")
 app.add_typer(models_app, name="models")
+app.add_typer(serve_app, name="serve")
 console = Console()
 
 
@@ -1744,6 +1759,286 @@ def gpus(
     for gpu in candidate_gpus(vram_gb, per_gpu_cap, cloud_type):
         table.add_row(gpu.id, str(gpu.memory_gb), f"{gpu.hourly(cloud_type) * gpu_count:.2f}")
     console.print(table)
+
+
+def _render_endpoints_table(endpoints: list[EndpointSummary]) -> Table:
+    table = Table(title="Hugging Face Inference Endpoints", title_style="bold #ef4444", border_style="grey37")
+    table.add_column("Name", style="cyan")
+    table.add_column("Repository", overflow="fold")
+    table.add_column("Status")
+    table.add_column("Hardware")
+    table.add_column("Scale-to-Zero", justify="right")
+    table.add_column("URL", overflow="fold")
+
+    for ep in endpoints:
+        status_style = (
+            "green"
+            if ep.status == "running"
+            else (
+                "yellow"
+                if ep.status in ("pending", "initializing")
+                else ("magenta" if ep.status == "scaledToZero" else ("dim" if ep.status == "paused" else "red"))
+            )
+        )
+        hw = []
+        if ep.accelerator:
+            hw.append(ep.accelerator)
+        if ep.instance_type:
+            hw.append(ep.instance_type)
+        if ep.instance_size:
+            hw.append(ep.instance_size)
+        hw_str = " ".join(hw) if hw else "-"
+        s2z = f"{ep.scale_to_zero_timeout}m" if ep.scale_to_zero_timeout else "off"
+        table.add_row(
+            ep.name,
+            ep.repository,
+            f"[{status_style}]{ep.status}[/]",
+            hw_str,
+            s2z,
+            ep.url or "-",
+        )
+    return table
+
+
+def _handle_serve_error(exc: Exception) -> None:
+    if isinstance(exc, InferencePermissionError):
+        hal_says(QUOTE_REFUSAL)
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1)
+    if isinstance(exc, InferenceEndpointNotFoundError):
+        hal_says(QUOTE_REFUSAL)
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1)
+    hal_says(QUOTE_REFUSAL)
+    console.print(f"[red]Error:[/] {exc}")
+    raise typer.Exit(1)
+
+
+@serve_app.callback(invoke_without_command=True)
+def serve_root(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
+    try:
+        endpoints = list_endpoints()
+    except Exception as exc:
+        _handle_serve_error(exc)
+        return
+
+    if not endpoints:
+        console.print("[dim]No active Hugging Face Inference Endpoints found.[/]")
+        console.print("Deploy one with: [cyan]opbdh serve create <model>[/]\n")
+        console.print(ctx.get_help())
+        return
+
+    console.print(_render_endpoints_table(endpoints))
+    console.print(
+        "\n[dim]Commands:[/] [cyan]opbdh serve test <name>[/] · "
+        "[cyan]opbdh serve pause <name>[/] · "
+        "[cyan]opbdh serve delete <name>[/]"
+    )
+
+
+@serve_app.command("create")
+@serve_app.command("up")
+def serve_create(
+    model: str = typer.Argument(
+        ..., help="Hugging Face model ID or repository (e.g. 'lumpenspace/reword-grpo-scaled')."
+    ),
+    name: str | None = typer.Option(None, "--name", "-n", help="Unique endpoint name (max 32 chars)."),
+    accelerator: str = typer.Option("gpu", "--accelerator", "-a", help="Hardware accelerator: 'gpu' or 'cpu'."),
+    instance_type: str = typer.Option(
+        "nvidia-a10g", "--instance-type", "-t", help="Instance type (e.g. 'nvidia-a10g', 'nvidia-l4')."
+    ),
+    instance_size: str = typer.Option("x1", "--instance-size", "-s", help="Instance size (e.g. 'x1', 'x2', 'x4')."),
+    vendor: str = typer.Option("aws", "--vendor", "-V", help="Cloud vendor: 'aws', 'gcp', 'azure'."),
+    region: str = typer.Option("us-east-1", "--region", "-r", help="Cloud region."),
+    scale_to_zero: int = typer.Option(
+        15, "--scale-to-zero", "-z", help="Scale-to-zero timeout in minutes (0 to disable)."
+    ),
+    framework: str = typer.Option("custom", "--framework", "-f", help="Framework: 'custom', 'pytorch'."),
+    wait: bool = typer.Option(True, "--wait/--no-wait", help="Wait for endpoint to reach running state."),
+    timeout: int = typer.Option(600, "--timeout", help="Max seconds to wait when --wait is enabled."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+) -> None:
+    """Deploy a model to a Hugging Face Inference Endpoint."""
+    ep_name = normalize_endpoint_name(model, name)
+    plan_table = Table(title="OPBDH Inference Endpoint plan", title_style="bold #ef4444", border_style="grey37")
+    plan_table.add_column("Field", style="cyan")
+    plan_table.add_column("Value")
+    plan_table.add_row("Model Repository", model)
+    plan_table.add_row("Endpoint Name", ep_name)
+    plan_table.add_row("Hardware", f"{accelerator} ({instance_type} {instance_size})")
+    plan_table.add_row("Cloud Location", f"{vendor} {region}")
+    plan_table.add_row("Scale-to-Zero", f"{scale_to_zero} minutes" if scale_to_zero > 0 else "disabled")
+    console.print(plan_table)
+
+    if not yes and _stdin_is_tty():
+        if not typer.confirm(f"Deploy Inference Endpoint '{ep_name}'?", default=True):
+            console.print("[dim]Aborted.[/]")
+            return
+
+    try:
+        summary = create_endpoint(
+            model,
+            name=ep_name,
+            accelerator=accelerator,
+            instance_type=instance_type,
+            instance_size=instance_size,
+            vendor=vendor,
+            region=region,
+            scale_to_zero_timeout=scale_to_zero,
+            framework=framework,
+            wait=wait,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        _handle_serve_error(exc)
+        return
+
+    hal_says(QUOTE_SUCCESS)
+    console.print(f"[green]Endpoint '{summary.name}' created successfully![/]")
+    if summary.url:
+        console.print(f"URL: [bold cyan]{summary.url}[/]")
+    console.print(f"Status: [bold green]{summary.status}[/]")
+    console.print(f"\n[dim]To test inference: [cyan]opbdh serve test {summary.name} --prompt \"Hello\"[/][/]")
+
+
+@serve_app.command("list")
+@serve_app.command("ls")
+def serve_list(
+    json_out: bool = typer.Option(False, "--json", "-j", help="Output JSON."),
+) -> None:
+    """List Hugging Face Inference Endpoints."""
+    try:
+        endpoints = list_endpoints()
+    except Exception as exc:
+        _handle_serve_error(exc)
+        return
+
+    if json_out:
+        console.print_json(json.dumps([asdict(ep) for ep in endpoints]))
+        return
+
+    if not endpoints:
+        console.print("[dim]No active Hugging Face Inference Endpoints found.[/]")
+        return
+
+    console.print(_render_endpoints_table(endpoints))
+
+
+@serve_app.command("status")
+@serve_app.command("info")
+def serve_status(
+    name: str = typer.Argument(..., help="Endpoint name."),
+    json_out: bool = typer.Option(False, "--json", "-j", help="Output JSON."),
+) -> None:
+    """Get status and details of a Hugging Face Inference Endpoint."""
+    try:
+        ep = get_endpoint(name)
+    except Exception as exc:
+        _handle_serve_error(exc)
+        return
+
+    if json_out:
+        console.print_json(json.dumps(asdict(ep)))
+        return
+
+    table = Table(title=f"Endpoint: {ep.name}", title_style="bold #ef4444", border_style="grey37")
+    table.add_column("Property", style="cyan")
+    table.add_column("Value")
+    table.add_row("Repository", ep.repository)
+    table.add_row("Status", ep.status)
+    table.add_row("URL", ep.url or "-")
+    table.add_row("Hardware", f"{ep.accelerator or '-'} ({ep.instance_type or '-'} {ep.instance_size or '-'})")
+    table.add_row("Cloud Location", f"{ep.vendor or '-'} {ep.region or '-'}")
+    table.add_row("Scale-to-Zero", f"{ep.scale_to_zero_timeout}m" if ep.scale_to_zero_timeout else "off")
+    table.add_row("Replicas", f"{ep.min_replica} - {ep.max_replica}")
+    if ep.created_at:
+        table.add_row("Created", str(ep.created_at))
+    if ep.updated_at:
+        table.add_row("Updated", str(ep.updated_at))
+    console.print(table)
+
+
+@serve_app.command("pause")
+def serve_pause(
+    name: str = typer.Argument(..., help="Endpoint name to pause."),
+) -> None:
+    """Pause an Inference Endpoint to stop billing."""
+    try:
+        ep = pause_endpoint(name)
+        console.print(f"[yellow]Endpoint '{ep.name}' paused. Billing halted.[/]")
+    except Exception as exc:
+        _handle_serve_error(exc)
+
+
+@serve_app.command("resume")
+def serve_resume(
+    name: str = typer.Argument(..., help="Endpoint name to resume."),
+) -> None:
+    """Resume a paused Inference Endpoint."""
+    try:
+        ep = resume_endpoint(name)
+        console.print(f"[green]Endpoint '{ep.name}' resumed. Status: {ep.status}[/]")
+    except Exception as exc:
+        _handle_serve_error(exc)
+
+
+@serve_app.command("delete")
+@serve_app.command("rm")
+@serve_app.command("down")
+def serve_delete(
+    name: str = typer.Argument(..., help="Endpoint name to delete."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+) -> None:
+    """Delete a Hugging Face Inference Endpoint."""
+    if not yes and _stdin_is_tty():
+        if not typer.confirm(f"Are you sure you want to permanently delete endpoint '{name}'?", default=False):
+            console.print("[dim]Aborted.[/]")
+            return
+
+    try:
+        delete_endpoint(name)
+        console.print(f"[green]Endpoint '{name}' deleted.[/]")
+    except Exception as exc:
+        _handle_serve_error(exc)
+
+
+@serve_app.command("test")
+@serve_app.command("query")
+def serve_test(
+    target: str = typer.Argument(..., help="Endpoint name, endpoint URL, or Hugging Face model ID."),
+    prompt: str | None = typer.Option(None, "--prompt", "-p", help="Prompt text to generate from."),
+    max_tokens: int = typer.Option(256, "--max-tokens", "-m", help="Max new tokens."),
+    temperature: float = typer.Option(0.7, "--temperature", "-T", help="Sampling temperature."),
+) -> None:
+    """Test inference on an endpoint or model."""
+    effective_prompt = prompt
+    if not effective_prompt:
+        if _stdin_is_tty():
+            import questionary
+
+            effective_prompt = questionary.text("Prompt:", style=hx.questionary_style()).ask()
+        else:
+            effective_prompt = sys.stdin.read().strip()
+
+    if not effective_prompt:
+        raise typer.BadParameter("Prompt cannot be empty.")
+
+    with HalEye("Running inference..."):
+        try:
+            output = test_inference(
+                target,
+                effective_prompt,
+                max_new_tokens=max_tokens,
+                temperature=temperature,
+            )
+        except Exception as exc:
+            _handle_serve_error(exc)
+            return
+
+    console.print("\n[bold green]Response:[/]")
+    console.print(output)
 
 
 def main() -> None:
