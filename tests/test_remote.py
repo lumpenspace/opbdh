@@ -196,3 +196,27 @@ def test_balance_api_is_exported_from_the_package() -> None:
     assert opbdh.runpod_balance is remote.runpod_balance
     assert opbdh.RunpodBalance is remote.RunpodBalance
     assert opbdh.InsufficientCreditsError is remote.InsufficientCreditsError
+
+
+def test_runpod_rest_identifies_itself(monkeypatch) -> None:
+    # Cloudflare in front of rest.runpod.io answers Python's default
+    # User-Agent with HTTP 403 (error code 1010); every request must carry ours.
+    seen = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def urlopen(request, timeout=0):
+        seen["ua"] = request.get_header("User-agent")
+        return Response()
+
+    monkeypatch.setattr(remote.urllib.request, "urlopen", urlopen)
+    remote._runpod_rest("GET", "/pods", api_token="token")
+    assert seen["ua"] == remote.USER_AGENT and seen["ua"].startswith("opbdh")
