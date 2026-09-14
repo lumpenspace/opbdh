@@ -21,6 +21,9 @@ from .config import (
 )
 
 
+USER_AGENT = "opbdh (+https://github.com/lumpenspace/opbdh)"
+
+
 DEFAULT_RUNPOD_GPU_TYPES = (
     "NVIDIA A100-SXM4-80GB",
     "NVIDIA H100 NVL",
@@ -80,7 +83,7 @@ def runpod_balance(api_token: str | None = None, *, timeout: int = 5) -> RunpodB
             data=json.dumps({"query": query}).encode("utf-8"),
             headers={
                 "Content-Type": "application/json",
-                "User-Agent": "opbdh/1.0",
+                "User-Agent": USER_AGENT,
             },
             method="POST",
         )
@@ -116,6 +119,9 @@ def _runpod_rest(
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {runpod_api_token(api_token)}",
+            # Cloudflare in front of rest.runpod.io rejects Python's default
+            # User-Agent outright (HTTP 403, error code 1010).
+            "User-Agent": USER_AGENT,
         },
         method=method,
     )
