@@ -85,6 +85,7 @@ _RECIPE_FIELDS = (
     "lora_r",
     "lora_alpha",
     "lora_dropout",
+    "lora_target_modules",
     "packing",
     "seed",
     "trust_remote_code",
@@ -139,6 +140,11 @@ class FineTuneProject:
     lora_r: int = 16
     lora_alpha: int = 32
     lora_dropout: float = 0.05
+    # Comma-separated module names to attach LoRA to. Empty means peft's
+    # "all-linear" shorthand, which is right for mainstream architectures but
+    # cannot resolve one whose output embedding is a bare nn.Parameter rather
+    # than a module (peft looks the module up by identity and raises).
+    lora_target_modules: str = ""
     packing: bool = False
     seed: int = 42
     trust_remote_code: bool = False
@@ -864,6 +870,7 @@ def prepare_finetune_job(root: Path, project: FineTuneProject) -> FineTuneJob:
         "lora_r": project.lora_r,
         "lora_alpha": project.lora_alpha,
         "lora_dropout": project.lora_dropout,
+        "lora_target_modules": project.lora_target_modules,
         "packing": project.packing,
         "seed": project.seed,
         "trust_remote_code": project.trust_remote_code,

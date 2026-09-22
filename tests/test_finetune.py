@@ -263,6 +263,34 @@ def test_same_dataset_supports_multiple_method_specific_recipes(tmp_path: Path) 
     assert json.loads((job.directory / "config.json").read_text())["recipe"] == "full-2gpu"
 
 
+def test_lora_target_modules_reach_the_runner_and_survive_a_reload(tmp_path: Path) -> None:
+    # An architecture peft's "all-linear" shorthand cannot walk (its lm_head is
+    # a bare nn.Parameter) needs its LoRA targets named outright.
+    project = FineTuneProject(
+        model_id="Org/Custom",
+        model_type="chat",
+        lora_target_modules="attn_query,attn_key,attn_value,mlp_gate",
+    )
+    add_project_examples(tmp_path, project, [FineTuneExample([{"role": "user", "content": "A"}], "one")])
+    save_finetune_project(tmp_path, project)
+
+    reloaded = load_finetune_project(tmp_path)
+    assert reloaded is not None
+    assert reloaded.lora_target_modules == "attn_query,attn_key,attn_value,mlp_gate"
+
+    job = prepare_finetune_job(tmp_path, reloaded)
+    config = json.loads((job.directory / "config.json").read_text())
+    assert config["lora_target_modules"] == "attn_query,attn_key,attn_value,mlp_gate"
+
+
+def test_lora_target_modules_default_to_the_all_linear_shorthand(tmp_path: Path) -> None:
+    project = FineTuneProject(model_id="Org/Chat", model_type="chat")
+    add_project_examples(tmp_path, project, [FineTuneExample([{"role": "user", "content": "A"}], "one")])
+    job = prepare_finetune_job(tmp_path, project)
+    # Empty in the config; the runner turns that into "all-linear", as before.
+    assert json.loads((job.directory / "config.json").read_text())["lora_target_modules"] == ""
+
+
 def test_version_one_project_is_promoted_to_default_recipe(tmp_path: Path) -> None:
     metadata = tmp_path / ".opbdh/finetune.json"
     metadata.parent.mkdir(parents=True)
@@ -363,6 +391,26 @@ def test_generated_runner_matches_pinned_trl_api_contract(tmp_path: Path) -> Non
     requirements = (job.directory / "requirements.txt").read_text(encoding="utf-8")
     assert "trl>=0.29.1,<0.30" in requirements
     assert "transformers>=5,<6" in requirements
+
+
+def test_gradient_checkpointing_follows_the_model_not_a_hardcoded_true(tmp_path: Path) -> None:
+    project = FineTuneProject(model_id="Org/Base", model_type="base")
+    add_project_examples(tmp_path, project, [FineTuneExample("input", "output")])
+    job = prepare_finetune_job(tmp_path, project)
+    source = (job.directory / "run.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    config_call = next(
+        call
+        for call in ast.walk(tree)
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "SFTConfig"
+    )
+    checkpointing = next(k.value for k in config_call.keywords if k.arg == "gradient_checkpointing")
+    # Asking an architecture that does not implement checkpointing for it makes
+    # transformers refuse to train at all, so this is read off the loaded model
+    # rather than assumed.
+    assert not isinstance(checkpointing, ast.Constant)
+    assert "supports_gradient_checkpointing" in source
 
 
 def test_resource_estimate_keeps_full_replica_on_each_gpu(monkeypatch: pytest.MonkeyPatch) -> None:
