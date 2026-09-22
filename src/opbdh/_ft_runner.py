@@ -100,8 +100,19 @@ def main() -> None:
     )
     if processing_class.pad_token is None:
         processing_class.pad_token = processing_class.eos_token
+    # Gradient checkpointing is a memory/compute trade the model has to
+    # implement; a small custom architecture often does not, and asking for it
+    # anyway makes transformers refuse to train at all. Trade the memory back
+    # rather than the run, and say so, since the ceiling moves.
+    wants_checkpointing = bool(getattr(model, "supports_gradient_checkpointing", False))
+    if not wants_checkpointing:
+        print(
+            f"[opbdh] {type(model).__name__} does not support gradient checkpointing; "
+            "training without it (expect higher memory use)",
+            flush=True,
+        )
     if method == "qlora":
-        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+        model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=wants_checkpointing)
 
     world_size = max(1, int(os.environ.get("WORLD_SIZE", "1")))
     training_args = SFTConfig(
@@ -113,8 +124,8 @@ def main() -> None:
         max_length=int(config["max_length"]),
         completion_only_loss=True,
         packing=bool(config["packing"]),
-        gradient_checkpointing=True,
-        gradient_checkpointing_kwargs={"use_reentrant": False},
+        gradient_checkpointing=wants_checkpointing,
+        gradient_checkpointing_kwargs={"use_reentrant": False} if wants_checkpointing else None,
         bf16=use_bf16,
         fp16=use_fp16,
         tf32=use_tf32,

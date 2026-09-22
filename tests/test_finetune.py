@@ -393,6 +393,26 @@ def test_generated_runner_matches_pinned_trl_api_contract(tmp_path: Path) -> Non
     assert "transformers>=5,<6" in requirements
 
 
+def test_gradient_checkpointing_follows_the_model_not_a_hardcoded_true(tmp_path: Path) -> None:
+    project = FineTuneProject(model_id="Org/Base", model_type="base")
+    add_project_examples(tmp_path, project, [FineTuneExample("input", "output")])
+    job = prepare_finetune_job(tmp_path, project)
+    source = (job.directory / "run.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    config_call = next(
+        call
+        for call in ast.walk(tree)
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "SFTConfig"
+    )
+    checkpointing = next(k.value for k in config_call.keywords if k.arg == "gradient_checkpointing")
+    # Asking an architecture that does not implement checkpointing for it makes
+    # transformers refuse to train at all, so this is read off the loaded model
+    # rather than assumed.
+    assert not isinstance(checkpointing, ast.Constant)
+    assert "supports_gradient_checkpointing" in source
+
+
 def test_resource_estimate_keeps_full_replica_on_each_gpu(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(finetune, "estimate_for_model", lambda *args, **kwargs: _estimate())
     project = FineTuneProject(
