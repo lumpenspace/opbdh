@@ -263,6 +263,34 @@ def test_same_dataset_supports_multiple_method_specific_recipes(tmp_path: Path) 
     assert json.loads((job.directory / "config.json").read_text())["recipe"] == "full-2gpu"
 
 
+def test_lora_target_modules_reach_the_runner_and_survive_a_reload(tmp_path: Path) -> None:
+    # An architecture peft's "all-linear" shorthand cannot walk (its lm_head is
+    # a bare nn.Parameter) needs its LoRA targets named outright.
+    project = FineTuneProject(
+        model_id="Org/Custom",
+        model_type="chat",
+        lora_target_modules="attn_query,attn_key,attn_value,mlp_gate",
+    )
+    add_project_examples(tmp_path, project, [FineTuneExample([{"role": "user", "content": "A"}], "one")])
+    save_finetune_project(tmp_path, project)
+
+    reloaded = load_finetune_project(tmp_path)
+    assert reloaded is not None
+    assert reloaded.lora_target_modules == "attn_query,attn_key,attn_value,mlp_gate"
+
+    job = prepare_finetune_job(tmp_path, reloaded)
+    config = json.loads((job.directory / "config.json").read_text())
+    assert config["lora_target_modules"] == "attn_query,attn_key,attn_value,mlp_gate"
+
+
+def test_lora_target_modules_default_to_the_all_linear_shorthand(tmp_path: Path) -> None:
+    project = FineTuneProject(model_id="Org/Chat", model_type="chat")
+    add_project_examples(tmp_path, project, [FineTuneExample([{"role": "user", "content": "A"}], "one")])
+    job = prepare_finetune_job(tmp_path, project)
+    # Empty in the config; the runner turns that into "all-linear", as before.
+    assert json.loads((job.directory / "config.json").read_text())["lora_target_modules"] == ""
+
+
 def test_version_one_project_is_promoted_to_default_recipe(tmp_path: Path) -> None:
     metadata = tmp_path / ".opbdh/finetune.json"
     metadata.parent.mkdir(parents=True)

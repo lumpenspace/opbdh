@@ -63,13 +63,18 @@ def main() -> None:
 
     peft_config = None
     if method in {"lora", "qlora"}:
+        # "all-linear" makes peft resolve the targets by walking the model,
+        # which needs its output embedding to be a module findable by identity;
+        # an architecture holding lm_head as a bare nn.Parameter makes that
+        # lookup raise StopIteration. Naming the modules skips the walk.
+        named = [m.strip() for m in str(config.get("lora_target_modules") or "").split(",") if m.strip()]
         peft_config = LoraConfig(
             r=int(config["lora_r"]),
             lora_alpha=int(config["lora_alpha"]),
             lora_dropout=float(config["lora_dropout"]),
             bias="none",
             task_type="CAUSAL_LM",
-            target_modules="all-linear",
+            target_modules=named or "all-linear",
         )
 
     quantization_config = None
