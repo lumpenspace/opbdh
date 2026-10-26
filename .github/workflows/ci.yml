@@ -27,3 +27,33 @@ jobs:
 
       - name: Test
         run: pytest
+
+  training-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install CPU training stack
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python - <<'PY'
+          from pathlib import Path
+          from tempfile import TemporaryDirectory
+          import subprocess
+          import sys
+          from opbdh.finetune import FineTuneExample, FineTuneProject, add_project_examples, prepare_finetune_job
+          with TemporaryDirectory() as directory:
+              root = Path(directory)
+              project = FineTuneProject(model_id="offline/model", model_type="base")
+              add_project_examples(root, project, [FineTuneExample("input", "output")])
+              job = prepare_finetune_job(root, project)
+              subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", str(job.directory / "requirements.txt")])
+          PY
+      - name: Exercise real PEFT and TRL on tiny local models
+        env:
+          HF_HUB_OFFLINE: "1"
+          CUDA_VISIBLE_DEVICES: ""
+        run: pytest tests/test_ft_runner.py tests/test_ft_runner_integration.py -q
